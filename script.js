@@ -49,10 +49,53 @@ class ChessGame {
         this.legalMoves = [];
         this.isPlayerTurn = true;
         this.movesHistory = [];
+        this.difficulty = 'medium'; // easy, medium, hard
+        this.botThinkingTime = 800; // базовое время思考
         
         this.initializeBoard();
         this.bindEvents();
+        this.createDifficultySelector();
         this.updateGame();
+    }
+
+    createDifficultySelector() {
+        const controls = document.querySelector('.controls');
+        if (!controls) return;
+
+        const difficultyDiv = document.createElement('div');
+        difficultyDiv.className = 'difficulty-selector';
+        difficultyDiv.style.margin = '10px 0';
+        difficultyDiv.style.textAlign = 'center';
+        
+        difficultyDiv.innerHTML = `
+            <label style="margin-right: 10px;">Уровень:</label>
+            <select id="difficulty" style="padding: 5px; border-radius: 5px; border: 1px solid #ccc;">
+                <option value="easy">🤖 Легкий</option>
+                <option value="medium" selected>🎯 Средний</option>
+                <option value="hard">🔥 Сложный</option>
+            </select>
+        `;
+        
+        controls.parentNode.insertBefore(difficultyDiv, controls);
+        
+        document.getElementById('difficulty').addEventListener('change', (e) => {
+            this.difficulty = e.target.value;
+            this.updateThinkingTime();
+        });
+    }
+
+    updateThinkingTime() {
+        switch(this.difficulty) {
+            case 'easy':
+                this.botThinkingTime = 500;
+                break;
+            case 'medium':
+                this.botThinkingTime = 800;
+                break;
+            case 'hard':
+                this.botThinkingTime = 1200;
+                break;
+        }
     }
 
     initializeBoard() {
@@ -87,13 +130,12 @@ class ChessGame {
     }
 
     updatePieces() {
-        console.log('Updating pieces...');
-        
         const squares = document.querySelectorAll('.square');
         squares.forEach(square => {
             square.textContent = '';
             square.classList.remove('check', 'selected', 'legal-move', 'legal-capture');
-            square.style.color = ''; // Сбрасываем цвет
+            square.style.color = '';
+            square.style.textShadow = '';
         });
         
         const board = this.chess.board();
@@ -105,7 +147,6 @@ class ChessGame {
                     const squareElement = document.querySelector(`[data-square="${squareName}"]`);
                     if (squareElement) {
                         squareElement.textContent = this.getPieceSymbol(piece);
-                        // УСТАНАВЛИВАЕМ ЦВЕТ ФИГУРЫ
                         squareElement.style.color = piece.color === 'w' ? '#FFFFFF' : '#000000';
                         if (piece.color === 'w') {
                             squareElement.style.textShadow = '1px 1px 2px rgba(0,0,0,0.5)';
@@ -230,18 +271,152 @@ class ChessGame {
 
     async makeBotMove() {
         this.updateStatus();
-        await new Promise(resolve => setTimeout(resolve, 1000));
         
-        const moves = this.chess.moves();
+        // Время思考 в зависимости от сложности
+        await new Promise(resolve => setTimeout(resolve, this.botThinkingTime));
+        
+        const moves = this.chess.moves({ verbose: true });
         if (moves.length > 0) {
-            const randomMove = moves[Math.floor(Math.random() * moves.length)];
-            this.chess.move(randomMove);
-            this.movesHistory.push(randomMove);
+            const bestMove = this.getBestMove(moves);
+            this.chess.move(bestMove);
+            this.movesHistory.push(bestMove.san);
             this.updateMovesList();
         }
         
         this.isPlayerTurn = true;
         this.updateGame();
+    }
+
+    getBestMove(moves) {
+        switch(this.difficulty) {
+            case 'easy':
+                return this.getEasyMove(moves);
+            case 'medium':
+                return this.getMediumMove(moves);
+            case 'hard':
+                return this.getHardMove(moves);
+            default:
+                return this.getMediumMove(moves);
+        }
+    }
+
+    getEasyMove(moves) {
+        // Легкий уровень - случайные ходы, иногда ошибается
+        let goodMoves = moves.filter(move => 
+            !move.san.includes('+') && // избегает шахи
+            !move.san.includes('x')    // избегает взятия
+        );
+        
+        if (goodMoves.length === 0) goodMoves = moves;
+        
+        // 30% chance сделать плохой ход
+        if (Math.random() < 0.3) {
+            const badMoves = moves.filter(move => 
+                move.san.includes('??') || // очень плохие ходы
+                this.isBadMove(move)
+            );
+            if (badMoves.length > 0) {
+                return badMoves[Math.floor(Math.random() * badMoves.length)];
+            }
+        }
+        
+        return goodMoves[Math.floor(Math.random() * goodMoves.length)];
+    }
+
+    getMediumMove(moves) {
+        // Средний уровень - предпочитает хорошие ходы
+        let bestMoves = moves.filter(move => 
+            move.san.includes('+') || // шахи
+            move.san.includes('x') || // взятия
+            move.flags.includes('c')  // взятия
+        );
+        
+        if (bestMoves.length === 0) {
+            bestMoves = moves.filter(move => 
+                !this.isBadMove(move) // избегает плохих ходов
+            );
+        }
+        
+        if (bestMoves.length === 0) bestMoves = moves;
+        
+        return bestMoves[Math.floor(Math.random() * bestMoves.length)];
+    }
+
+    getHardMove(moves) {
+        // Сложный уровень - умная стратегия
+        let bestMoves = [];
+        
+        // 1. Приоритет - матовые атаки
+        bestMoves = moves.filter(move => 
+            move.san.includes('#') || // мат
+            move.san.includes('+')    // шах
+        );
+        
+        // 2. Приоритет - взятия фигур
+        if (bestMoves.length === 0) {
+            bestMoves = moves.filter(move => 
+                move.san.includes('x') || // взятия
+                move.flags.includes('c')  // взятия
+            );
+            
+            // Сортировка взятий по ценности
+            bestMoves.sort((a, b) => this.getCaptureValue(b) - this.getCaptureValue(a));
+        }
+        
+        // 3. Развитие фигур и контроль центра
+        if (bestMoves.length === 0) {
+            bestMoves = moves.filter(move => 
+                this.isGoodPositionalMove(move)
+            );
+        }
+        
+        // 4. Любой ход
+        if (bestMoves.length === 0) {
+            bestMoves = moves.filter(move => 
+                !this.isBadMove(move)
+            );
+        }
+        
+        if (bestMoves.length === 0) bestMoves = moves;
+        
+        return bestMoves[Math.floor(Math.random() * Math.min(bestMoves.length, 3))];
+    }
+
+    isBadMove(move) {
+        // Определяет явно плохие ходы
+        const badSquares = ['a3', 'h3', 'a6', 'h6']; // плохие для пешек
+        const piece = this.chess.get(move.from);
+        
+        if (piece && piece.type === 'p') {
+            if (badSquares.includes(move.to)) return true;
+        }
+        
+        return move.san.includes('??') || // очень плохие ходы
+               (move.san.includes('?') && Math.random() < 0.7); // 70% избегать сомнительных
+    }
+
+    isGoodPositionalMove(move) {
+        // Хорошие позиционные ходы
+        const centerSquares = ['d4', 'e4', 'd5', 'e5', 'c3', 'f3', 'c6', 'f6'];
+        const developmentSquares = ['c3', 'f3', 'c6', 'f6', 'd2', 'e2', 'd7', 'e7'];
+        
+        if (centerSquares.includes(move.to)) return true;
+        if (developmentSquares.includes(move.to)) return true;
+        
+        return false;
+    }
+
+    getCaptureValue(move) {
+        // Ценность взятия
+        const pieceValues = {
+            'p': 1, 'n': 3, 'b': 3, 'r': 5, 'q': 9, 'k': 0
+        };
+        
+        const capturedPiece = this.chess.get(move.to);
+        if (capturedPiece) {
+            return pieceValues[capturedPiece.type] || 0;
+        }
+        return 0;
     }
 
     updateGame() {
@@ -253,10 +428,13 @@ class ChessGame {
         const statusElement = document.getElementById('status');
         const turnElement = document.getElementById('turn');
         
-        if (!statusElement || !turnElement) {
-            console.error('Status elements not found!');
-            return;
-        }
+        if (!statusElement || !turnElement) return;
+        
+        const difficultyNames = {
+            'easy': '🤖 Легкий',
+            'medium': '🎯 Средний', 
+            'hard': '🔥 Сложный'
+        };
         
         if (this.chess.game_over()) {
             if (this.chess.in_checkmate()) {
@@ -265,7 +443,9 @@ class ChessGame {
                 statusElement.textContent = 'Ничья!';
             }
         } else {
-            statusElement.textContent = this.isPlayerTurn ? 'Ваш ход' : 'Ход бота...';
+            statusElement.textContent = this.isPlayerTurn ? 
+                `Ваш ход (${difficultyNames[this.difficulty]})` : 
+                `Ход бота (${difficultyNames[this.difficulty]})...`;
         }
         
         turnElement.textContent = `Ход: ${this.chess.turn() === 'w' ? 'белые' : 'черные'}`;
