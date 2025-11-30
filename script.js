@@ -93,6 +93,7 @@ class ChessGame {
         squares.forEach(square => {
             square.textContent = '';
             square.classList.remove('check', 'selected', 'legal-move', 'legal-capture');
+            square.style.color = ''; // Сбрасываем цвет
         });
         
         const board = this.chess.board();
@@ -104,7 +105,13 @@ class ChessGame {
                     const squareElement = document.querySelector(`[data-square="${squareName}"]`);
                     if (squareElement) {
                         squareElement.textContent = this.getPieceSymbol(piece);
-                        console.log(`Set ${piece.type}${piece.color} at ${squareName}: ${squareElement.textContent}`);
+                        // УСТАНАВЛИВАЕМ ЦВЕТ ФИГУРЫ
+                        squareElement.style.color = piece.color === 'w' ? '#FFFFFF' : '#000000';
+                        if (piece.color === 'w') {
+                            squareElement.style.textShadow = '1px 1px 2px rgba(0,0,0,0.5)';
+                        } else {
+                            squareElement.style.textShadow = '1px 1px 2px rgba(255,255,255,0.3)';
+                        }
                     }
                 }
             }
@@ -294,7 +301,6 @@ class ChessGame {
     }
 
     flipBoard() {
-        // Простая реализация переворота доски
         alert('Переворот доски в разработке');
     }
 
