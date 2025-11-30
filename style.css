@@ -101,8 +101,18 @@ button#surrender:hover {
     cursor: pointer;
     transition: background 0.2s;
     font-weight: bold;
-    font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
-    color: #2c3e50;
+    font-family: "Segoe UI Symbol", "Arial Unicode MS", sans-serif;
+}
+
+/* ЦВЕТА ФИГУР - ВАЖНО! */
+.square .white-piece {
+    color: #ffffff !important;
+    text-shadow: 1px 1px 2px rgba(0,0,0,0.5);
+}
+
+.square .black-piece {
+    color: #000000 !important;
+    text-shadow: 1px 1px 2px rgba(255,255,255,0.3);
 }
 
 .square.white {
@@ -129,14 +139,6 @@ button#surrender:hover {
 .square.check {
     background: #ff6b6b !important;
 }
-
-/* Стили для фигур через CSS */
-.piece-pw, .piece-pb { font-weight: bold; }
-.piece-rw, .piece-rb { font-weight: bold; }
-.piece-nw, .piece-nb { font-weight: bold; }
-.piece-bw, .piece-bb { font-weight: bold; }
-.piece-qw, .piece-qb { font-weight: bold; }
-.piece-kw, .piece-kb { font-weight: bold; }
 
 .moves-history {
     margin-top: 20px;
