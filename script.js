@@ -33,7 +33,6 @@ class TelegramIntegration {
     }
 
     clearCache() {
-        // Принудительно очищаем кеш при загрузке
         if (performance && performance.navigation && performance.navigation.type === 1) {
             console.log('🔄 Страница была перезагружена - очищаем кеш');
         }
@@ -52,7 +51,6 @@ class TelegramIntegration {
             window.location.reload();
         });
 
-        // Сохраняем игру при закрытии Telegram Web App
         webApp.onEvent('viewportChanged', this.saveGameState.bind(this));
         webApp.onEvent('closing', this.saveGameState.bind(this));
     }
@@ -76,13 +74,11 @@ class TelegramIntegration {
     }
 
     displayVersion() {
-        // Удаляем старый элемент версии если существует
         const oldVersion = document.getElementById('app-version');
         if (oldVersion) {
             oldVersion.remove();
         }
 
-        // Создаем новый элемент для отображения версии
         const versionElement = document.createElement('div');
         versionElement.id = 'app-version';
         versionElement.style.cssText = `
@@ -103,12 +99,10 @@ class TelegramIntegration {
         versionElement.title = `Версия ${this.version}\nНажмите для подробной информации`;
         versionElement.innerHTML = `v${this.version} <span style="color: #4CAF50;">●</span>`;
         
-        // Добавляем возможность посмотреть историю версий
         versionElement.addEventListener('click', () => {
             this.showVersionInfo();
         });
         
-        // Добавляем возможность посмотреть информацию о версии при наведении
         versionElement.addEventListener('mouseenter', () => {
             versionElement.style.background = 'rgba(0,0,0,0.9)';
         });
@@ -123,7 +117,6 @@ class TelegramIntegration {
         console.log(`%c📝 ${this.versionHistory[this.version]}`, 'color: #888;');
         console.log(`%c🏗️ Сборка: ${this.buildDate}`, 'color: #888;');
         
-        // Показываем уведомление о версии при загрузке
         this.showVersionNotification();
     }
 
@@ -133,7 +126,6 @@ class TelegramIntegration {
         infoText += `Сборка: ${this.buildDate}\n\n`;
         infoText += `История изменений:\n`;
         
-        // Сортируем версии по убыванию
         const versions = Object.keys(this.versionHistory).sort((a, b) => {
             const [aMajor, aMinor, aPatch] = a.split('.').map(Number);
             const [bMajor, bMinor, bPatch] = b.split('.').map(Number);
@@ -148,7 +140,6 @@ class TelegramIntegration {
     }
 
     showVersionNotification() {
-        // Показываем всплывающее уведомление о версии только если это новая версия
         const lastSeenVersion = localStorage.getItem('lastSeenVersion');
         
         if (!lastSeenVersion || lastSeenVersion !== this.version) {
@@ -156,18 +147,14 @@ class TelegramIntegration {
                 console.log(`%c🆕 Загружена новая версия! v${this.version}`, 'color: #FF9800; font-weight: bold;');
             }, 1000);
             
-            // Сохраняем текущую версию как просмотренную
             localStorage.setItem('lastSeenVersion', this.version);
         }
     }
 
-    // Метод для обновления версии
     updateVersion(newVersion, description) {
         this.version = newVersion;
         this.versionHistory[newVersion] = description;
         this.buildDate = new Date().toISOString().split('T')[0];
-        
-        // Обновляем отображение
         this.displayVersion();
         
         console.log(`%c🔄 Версия обновлена до v${newVersion}`, 'color: #4CAF50; font-weight: bold;');
@@ -191,10 +178,9 @@ class ChessGame {
         this.initializeBoard();
         this.bindEvents();
         this.createDifficultySelector();
-        this.loadGame(); // Загружаем сохраненную игру при запуске
+        this.loadGame();
         this.updateGame();
         
-        // Сохраняем ссылку на экземпляр игры в глобальной области
         window.chessGame = this;
     }
 
@@ -223,18 +209,16 @@ class ChessGame {
             if (saved) {
                 const gameState = JSON.parse(saved);
                 
-                // Проверяем, не устарело ли сохранение (больше 24 часов)
                 const savedTime = new Date(gameState.timestamp);
                 const currentTime = new Date();
                 const hoursDiff = (currentTime - savedTime) / (1000 * 60 * 60);
                 
-                if (hoursDiff < 24) { // Сохранение действительно 24 часа
+                if (hoursDiff < 24) {
                     this.chess.load(gameState.fen);
                     this.movesHistory = gameState.movesHistory || [];
                     this.difficulty = gameState.difficulty || 'medium';
                     this.isPlayerTurn = gameState.isPlayerTurn !== undefined ? gameState.isPlayerTurn : true;
                     
-                    // Обновляем селектор сложности
                     const difficultySelect = document.getElementById('difficulty');
                     if (difficultySelect) {
                         difficultySelect.value = this.difficulty;
@@ -242,8 +226,6 @@ class ChessGame {
                     
                     this.updateThinkingTime();
                     console.log('💾 Игра загружена');
-                    
-                    // Показываем уведомление о загрузке
                     this.showLoadNotification();
                 } else {
                     console.log('💾 Сохранение устарело, начинаем новую игру');
@@ -252,7 +234,6 @@ class ChessGame {
             }
         } catch (error) {
             console.error('Ошибка при загрузке игры:', error);
-            // При ошибке загрузки начинаем новую игру
             localStorage.removeItem('chessGameState');
         }
     }
@@ -299,11 +280,175 @@ class ChessGame {
         difficultySelect.addEventListener('change', (e) => {
             this.difficulty = e.target.value;
             this.updateThinkingTime();
-            this.saveGame(); // Сохраняем при изменении сложности
+            this.saveGame();
         });
     }
 
-    // Остальные методы остаются без изменений, но добавляем сохранение после ходов...
+    updateThinkingTime() {
+        switch(this.difficulty) {
+            case 'easy':
+                this.botThinkingTime = 500;
+                break;
+            case 'medium':
+                this.botThinkingTime = 800;
+                break;
+            case 'hard':
+                this.botThinkingTime = 1200;
+                break;
+        }
+        this.saveGame();
+    }
+
+    initializeBoard() {
+        const board = document.getElementById('board');
+        if (!board) {
+            console.error('Board element not found!');
+            return;
+        }
+        
+        board.innerHTML = '';
+        
+        for (let i = 0; i < 64; i++) {
+            const square = document.createElement('div');
+            const row = Math.floor(i / 8);
+            const col = i % 8;
+            
+            square.className = `square ${(row + col) % 2 === 0 ? 'white' : 'black'}`;
+            square.dataset.square = this.getSquareName(i);
+            
+            board.appendChild(square);
+        }
+        
+        this.updatePieces();
+    }
+
+    getSquareName(index) {
+        const files = 'abcdefgh';
+        const ranks = '87654321';
+        const row = Math.floor(index / 8);
+        const col = index % 8;
+        return files[col] + ranks[row];
+    }
+
+    updatePieces() {
+        const squares = document.querySelectorAll('.square');
+        squares.forEach(square => {
+            square.textContent = '';
+            square.classList.remove('check', 'selected', 'legal-move', 'legal-capture');
+            square.style.color = '';
+            square.style.textShadow = '';
+        });
+        
+        const board = this.chess.board();
+        for (let i = 0; i < 8; i++) {
+            for (let j = 0; j < 8; j++) {
+                const piece = board[i][j];
+                if (piece) {
+                    const squareName = this.getSquareName(i * 8 + j);
+                    const squareElement = document.querySelector(`[data-square="${squareName}"]`);
+                    if (squareElement) {
+                        squareElement.textContent = this.getPieceSymbol(piece);
+                        squareElement.style.color = piece.color === 'w' ? '#FFFFFF' : '#000000';
+                        if (piece.color === 'w') {
+                            squareElement.style.textShadow = '1px 1px 2px rgba(0,0,0,0.5)';
+                        } else {
+                            squareElement.style.textShadow = '1px 1px 2px rgba(255,255,255,0.3)';
+                        }
+                    }
+                }
+            }
+        }
+
+        if (this.chess.in_check()) {
+            const kingColor = this.chess.turn();
+            const kingSquare = this.findKingSquare(kingColor);
+            if (kingSquare) {
+                const kingElement = document.querySelector(`[data-square="${kingSquare}"]`);
+                kingElement.classList.add('check');
+            }
+        }
+    }
+
+    getPieceSymbol(piece) {
+        const symbols = {
+            'p': '♟', 'r': '♜', 'n': '♞', 'b': '♝', 'q': '♛', 'k': '♚',
+            'P': '♙', 'R': '♖', 'N': '♘', 'B': '♗', 'Q': '♕', 'K': '♔'
+        };
+        return symbols[piece.type] || '?';
+    }
+
+    findKingSquare(color) {
+        const board = this.chess.board();
+        for (let i = 0; i < 8; i++) {
+            for (let j = 0; j < 8; j++) {
+                const piece = board[i][j];
+                if (piece && piece.type === 'k' && piece.color === color) {
+                    const files = 'abcdefgh';
+                    const ranks = '87654321';
+                    return files[j] + ranks[i];
+                }
+            }
+        }
+        return null;
+    }
+
+    bindEvents() {
+        document.getElementById('newGame').addEventListener('click', () => this.newGame());
+        document.getElementById('flipBoard').addEventListener('click', () => this.flipBoard());
+        document.getElementById('surrender').addEventListener('click', () => this.surrender());
+        
+        document.addEventListener('click', (e) => {
+            if (e.target.classList.contains('square')) {
+                this.handleSquareClick(e.target.dataset.square);
+            }
+        });
+    }
+
+    handleSquareClick(squareName) {
+        if (!this.isPlayerTurn) return;
+        
+        const piece = this.chess.get(squareName);
+        
+        if (piece && piece.color === 'w') {
+            this.selectedSquare = squareName;
+            this.legalMoves = this.chess.moves({ square: squareName, verbose: true });
+            this.highlightLegalMoves();
+        }
+        else if (this.selectedSquare && this.legalMoves.some(move => move.to === squareName)) {
+            this.makeMove(this.selectedSquare, squareName);
+        }
+        else {
+            this.clearSelection();
+        }
+    }
+
+    highlightLegalMoves() {
+        this.clearHighlights();
+        
+        const selectedElement = document.querySelector(`[data-square="${this.selectedSquare}"]`);
+        selectedElement.classList.add('selected');
+        
+        this.legalMoves.forEach(move => {
+            const squareElement = document.querySelector(`[data-square="${move.to}"]`);
+            if (this.chess.get(move.to)) {
+                squareElement.classList.add('legal-capture');
+            } else {
+                squareElement.classList.add('legal-move');
+            }
+        });
+    }
+
+    clearHighlights() {
+        document.querySelectorAll('.square').forEach(square => {
+            square.classList.remove('selected', 'legal-move', 'legal-capture');
+        });
+    }
+
+    clearSelection() {
+        this.selectedSquare = null;
+        this.legalMoves = [];
+        this.clearHighlights();
+    }
 
     async makeMove(from, to) {
         try {
@@ -330,7 +475,7 @@ class ChessGame {
                 this.updateMovesList();
                 this.clearSelection();
                 this.updateGame();
-                this.saveGame(); // Сохраняем после хода игрока
+                this.saveGame();
             
                 if (!this.chess.game_over() && this.chess.turn() === 'b') {
                     this.isPlayerTurn = false;
@@ -393,7 +538,7 @@ class ChessGame {
                 if (moveResult) {
                     this.movesHistory.push(moveResult.san);
                     this.updateMovesList();
-                    this.saveGame(); // Сохраняем после хода бота
+                    this.saveGame();
                 } else {
                     throw new Error('Invalid move selected by bot');
                 }
@@ -419,6 +564,206 @@ class ChessGame {
         this.updateGame();
     }
 
+    handlePromotionMoves(promotionMoves) {
+        const bestPromotionMove = promotionMoves[0];
+        return {
+            from: bestPromotionMove.from,
+            to: bestPromotionMove.to,
+            promotion: 'q'
+        };
+    }
+
+    createMoveObject(move) {
+        const moveObj = {
+            from: move.from,
+            to: move.to
+        };
+        
+        const piece = this.chess.get(move.from);
+        if (piece && piece.type === 'p') {
+            const targetRank = move.to[1];
+            if ((piece.color === 'b' && targetRank === '1') || 
+                (piece.color === 'w' && targetRank === '8')) {
+                moveObj.promotion = 'q';
+            }
+        }
+        
+        return moveObj;
+    }
+
+    getBestMove(moves) {
+        if (moves.length === 0) return null;
+        
+        switch(this.difficulty) {
+            case 'easy':
+                return this.createMoveObject(this.getEasyMove(moves));
+            case 'medium':
+                return this.createMoveObject(this.getMediumMove(moves));
+            case 'hard':
+                return this.createMoveObject(this.getHardMove(moves));
+            default:
+                return this.createMoveObject(this.getMediumMove(moves));
+        }
+    }
+
+    getEasyMove(moves) {
+        let goodMoves = moves.filter(move => 
+            !move.san.includes('+') &&
+            !move.san.includes('x')
+        );
+        
+        if (goodMoves.length === 0) goodMoves = moves;
+        
+        if (Math.random() < 0.3) {
+            const badMoves = moves.filter(move => 
+                move.san.includes('??') ||
+                this.isBadMove(move)
+            );
+            if (badMoves.length > 0) {
+                return badMoves[Math.floor(Math.random() * badMoves.length)];
+            }
+        }
+        
+        return goodMoves[Math.floor(Math.random() * goodMoves.length)];
+    }
+
+    getMediumMove(moves) {
+        let bestMoves = moves.filter(move => 
+            move.san.includes('+') ||
+            move.san.includes('x') ||
+            (move.flags && move.flags.includes('c'))
+        );
+        
+        if (bestMoves.length === 0) {
+            bestMoves = moves.filter(move => 
+                !this.isBadMove(move)
+            );
+        }
+        
+        if (bestMoves.length === 0) bestMoves = moves;
+        
+        return bestMoves[Math.floor(Math.random() * bestMoves.length)];
+    }
+
+    getHardMove(moves) {
+        let bestMoves = [];
+        
+        bestMoves = moves.filter(move => 
+            move.san.includes('#') ||
+            move.san.includes('+')
+        );
+        
+        if (bestMoves.length === 0) {
+            bestMoves = moves.filter(move => 
+                move.san.includes('x') ||
+                (move.flags && move.flags.includes('c'))
+            );
+            
+            bestMoves.sort((a, b) => this.getCaptureValue(b) - this.getCaptureValue(a));
+        }
+        
+        if (bestMoves.length === 0) {
+            bestMoves = moves.filter(move => 
+                this.isGoodPositionalMove(move)
+            );
+        }
+        
+        if (bestMoves.length === 0) {
+            bestMoves = moves.filter(move => 
+                !this.isBadMove(move)
+            );
+        }
+        
+        if (bestMoves.length === 0) bestMoves = moves;
+        
+        return bestMoves[Math.floor(Math.random() * Math.min(bestMoves.length, 3))];
+    }
+
+    isBadMove(move) {
+        const badSquares = ['a3', 'h3', 'a6', 'h6'];
+        const piece = this.chess.get(move.from);
+        
+        if (piece && piece.type === 'p') {
+            if (badSquares.includes(move.to)) return true;
+        }
+        
+        return move.san.includes('??') ||
+               (move.san.includes('?') && Math.random() < 0.7);
+    }
+
+    isGoodPositionalMove(move) {
+        const centerSquares = ['d4', 'e4', 'd5', 'e5', 'c3', 'f3', 'c6', 'f6'];
+        const developmentSquares = ['c3', 'f3', 'c6', 'f6', 'd2', 'e2', 'd7', 'e7'];
+        
+        if (centerSquares.includes(move.to)) return true;
+        if (developmentSquares.includes(move.to)) return true;
+        
+        return false;
+    }
+
+    getCaptureValue(move) {
+        const pieceValues = {
+            'p': 1, 'n': 3, 'b': 3, 'r': 5, 'q': 9, 'k': 0
+        };
+        
+        const capturedPiece = this.chess.get(move.to);
+        if (capturedPiece) {
+            return pieceValues[capturedPiece.type] || 0;
+        }
+        return 0;
+    }
+
+    updateGame() {
+        this.updatePieces();
+        this.updateStatus();
+    }
+
+    updateStatus() {
+        const statusElement = document.getElementById('status');
+        const turnElement = document.getElementById('turn');
+        
+        if (!statusElement || !turnElement) return;
+        
+        const difficultyNames = {
+            'easy': '🤖 Легкий',
+            'medium': '🎯 Средний', 
+            'hard': '🔥 Сложный'
+        };
+        
+        if (this.chess.game_over()) {
+            if (this.chess.in_checkmate()) {
+                statusElement.textContent = this.chess.turn() === 'w' ? 
+                    'Мат! Черные выиграли.' : 'Мат! Белые выиграли.';
+            } else {
+                statusElement.textContent = 'Ничья!';
+            }
+        } else {
+            statusElement.textContent = this.isPlayerTurn ? 
+                `Ваш ход (${difficultyNames[this.difficulty]})` : 
+                `Ход бота (${difficultyNames[this.difficulty]})...`;
+        }
+        
+        turnElement.textContent = `Ход: ${this.chess.turn() === 'w' ? 'белые' : 'черные'}`;
+    }
+
+    updateMovesList() {
+        const movesList = document.getElementById('movesList');
+        if (!movesList) return;
+        
+        movesList.innerHTML = '';
+        
+        for (let i = 0; i < this.movesHistory.length; i += 2) {
+            const moveNumber = Math.floor(i / 2) + 1;
+            const whiteMove = this.movesHistory[i];
+            const blackMove = this.movesHistory[i + 1] || '';
+            
+            const moveElement = document.createElement('div');
+            moveElement.className = 'move-number';
+            moveElement.textContent = `${moveNumber}. ${whiteMove} ${blackMove}`;
+            movesList.appendChild(moveElement);
+        }
+    }
+
     newGame() {
         if (confirm('Начать новую игру? Текущий прогресс будет потерян.')) {
             this.chess.reset();
@@ -429,9 +774,8 @@ class ChessGame {
             this.clearHighlights();
             this.updateGame();
             this.updateMovesList();
-            this.saveGame(); // Сохраняем новую игру
+            this.saveGame();
             
-            // Показываем уведомление
             const statusElement = document.getElementById('status');
             if (statusElement) {
                 statusElement.textContent = 'Новая игра началась!';
@@ -440,25 +784,10 @@ class ChessGame {
         }
     }
 
-    // ... остальные методы без изменений
-
-    // Добавляем сохранение при изменении сложности
-    updateThinkingTime() {
-        switch(this.difficulty) {
-            case 'easy':
-                this.botThinkingTime = 500;
-                break;
-            case 'medium':
-                this.botThinkingTime = 800;
-                break;
-            case 'hard':
-                this.botThinkingTime = 1200;
-                break;
-        }
-        this.saveGame();
+    flipBoard() {
+        alert('Переворот доски в разработке');
     }
 
-    // Также сохраняем при сдаче
     surrender() {
         if (confirm('Сдаться?')) {
             this.newGame();
