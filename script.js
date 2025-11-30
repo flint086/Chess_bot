@@ -259,8 +259,8 @@ class ChessGame {
                 const targetRank = to[1]; // цифра (1 или 8)
                 if ((piece.color === 'w' && targetRank === '8') || 
                     (piece.color === 'b' && targetRank === '1')) {
-                    // Пешка дошла до конца - предлагаем выбор превращения
-                    promotion = this.choosePromotionForPlayer();
+                    // Пешка дошла до конца - выбираем ферзя
+                    promotion = 'q';
                 }
             }
         
@@ -291,64 +291,80 @@ class ChessGame {
         }
     }
 
-    choosePromotionForPlayer() {
-        // Для игрока можно сделать всплывающее окно с выбором,
-        // но для простоты тоже выбираем ферзя
-        return 'q';
-    }
-
     async makeBotMove() {
         this.updateStatus();
     
         try {
             await new Promise(resolve => setTimeout(resolve, this.botThinkingTime));
-        
+            
+            // Получаем все возможные ходы
             const moves = this.chess.moves({ verbose: true });
-            if (moves.length > 0) {
-                let bestMove = this.getBestMove(moves);
             
-                // Для ходов с превращением выбираем оптимальную фигуру
-                if (bestMove.flags && bestMove.flags.includes('p')) {
-                    bestMove.promotion = this.choosePromotion(bestMove);
+            if (moves.length === 0) {
+                console.log('No moves available for bot');
+                this.isPlayerTurn = true;
+                this.updateGame();
+                return;
+            }
+            
+            // Ищем ходы с превращением пешки
+            const promotionMoves = [];
+            const regularMoves = [];
+            
+            moves.forEach(move => {
+                const piece = this.chess.get(move.from);
+                if (piece && piece.type === 'p') {
+                    const targetRank = move.to[1];
+                    // Пешка бота (черные) доходит до 1-й горизонтали
+                    if (piece.color === 'b' && targetRank === '1') {
+                        promotionMoves.push(move);
+                        return;
+                    }
+                    // Пешка игрока (белые) доходит до 8-й горизонтали  
+                    if (piece.color === 'w' && targetRank === '8') {
+                        promotionMoves.push(move);
+                        return;
+                    }
                 }
+                regularMoves.push(move);
+            });
             
-                // Создаем объект хода с правильными полями
-                const moveObj = {
-                    from: bestMove.from,
-                    to: bestMove.to
-                };
+            let selectedMove;
             
-                if (bestMove.promotion) {
-                    moveObj.promotion = bestMove.promotion;
-                }
+            // Если есть ходы с превращением, обрабатываем их отдельно
+            if (promotionMoves.length > 0) {
+                selectedMove = this.handlePromotionMoves(promotionMoves);
+            } else {
+                // Обычные ходы
+                selectedMove = this.getBestMove(regularMoves.length > 0 ? regularMoves : moves);
+            }
             
-                const moveResult = this.chess.move(moveObj);
-            
+            // Выполняем ход
+            if (selectedMove) {
+                const moveResult = this.chess.move(selectedMove);
                 if (moveResult) {
                     this.movesHistory.push(moveResult.san);
                     this.updateMovesList();
                 } else {
-                    console.error('Invalid bot move:', moveObj);
-                    // Если ход невалидный, делаем случайный ход
-                    const randomMove = moves[Math.floor(Math.random() * moves.length)];
-                    const fallbackMove = {
-                        from: randomMove.from,
-                        to: randomMove.to
-                    };
-                    this.chess.move(fallbackMove);
+                    throw new Error('Invalid move selected by bot');
                 }
+            } else {
+                // Если не удалось выбрать ход, берем первый доступный
+                const fallbackMove = this.createMoveObject(moves[0]);
+                this.chess.move(fallbackMove);
             }
+            
         } catch (error) {
             console.error('Error in bot move:', error);
-            // В случае ошибки пробуем сделать любой допустимый ход
+            // Экстренное восстановление - пробуем любой ход
             try {
                 const moves = this.chess.moves({ verbose: true });
                 if (moves.length > 0) {
-                    const randomMove = moves[Math.floor(Math.random() * moves.length)];
-                    this.chess.move({ from: randomMove.from, to: randomMove.to });
+                    const randomMove = this.createMoveObject(moves[0]);
+                    this.chess.move(randomMove);
                 }
             } catch (fallbackError) {
-                console.error('Fallback move also failed:', fallbackError);
+                console.error('Emergency recovery failed:', fallbackError);
             }
         }
     
@@ -356,38 +372,48 @@ class ChessGame {
         this.updateGame();
     }
 
-    choosePromotion(move) {
-        try {
-            // Бот всегда выбирает ферзя при превращении - это сильнейший выбор
-            const testBoard = new Chess(this.chess.fen());
-            const testMove = testBoard.move({ 
-                from: move.from, 
-                to: move.to, 
-                promotion: 'q' 
-            });
+    handlePromotionMoves(promotionMoves) {
+        // Для ходов с превращением всегда выбираем ферзя (самый сильный вариант)
+        const bestPromotionMove = promotionMoves[0];
+        return {
+            from: bestPromotionMove.from,
+            to: bestPromotionMove.to,
+            promotion: 'q' // Всегда ферзь
+        };
+    }
+
+    createMoveObject(move) {
+        // Создает безопасный объект хода
+        const moveObj = {
+            from: move.from,
+            to: move.to
+        };
         
-            if (testMove && !testBoard.isStalemate() && !testBoard.isDraw()) {
-                return 'q'; // Ферзь - лучший выбор
+        // Добавляем превращение только если это действительно превращение пешки
+        const piece = this.chess.get(move.from);
+        if (piece && piece.type === 'p') {
+            const targetRank = move.to[1];
+            if ((piece.color === 'b' && targetRank === '1') || 
+                (piece.color === 'w' && targetRank === '8')) {
+                moveObj.promotion = 'q'; // Всегда ферзь для простоты
             }
-        
-            // Если ферзь приводит к пату или ошибке, выбираем ладью
-            return 'r';
-        } catch (error) {
-            // В случае ошибки выбираем ферзя (самый безопасный вариант)
-            return 'q';
         }
+        
+        return moveObj;
     }
 
     getBestMove(moves) {
+        if (moves.length === 0) return null;
+        
         switch(this.difficulty) {
             case 'easy':
-                return this.getEasyMove(moves);
+                return this.createMoveObject(this.getEasyMove(moves));
             case 'medium':
-                return this.getMediumMove(moves);
+                return this.createMoveObject(this.getMediumMove(moves));
             case 'hard':
-                return this.getHardMove(moves);
+                return this.createMoveObject(this.getHardMove(moves));
             default:
-                return this.getMediumMove(moves);
+                return this.createMoveObject(this.getMediumMove(moves));
         }
     }
 
@@ -419,7 +445,7 @@ class ChessGame {
         let bestMoves = moves.filter(move => 
             move.san.includes('+') || // шахи
             move.san.includes('x') || // взятия
-            move.flags.includes('c')  // взятия
+            (move.flags && move.flags.includes('c'))  // взятия
         );
         
         if (bestMoves.length === 0) {
@@ -447,7 +473,7 @@ class ChessGame {
         if (bestMoves.length === 0) {
             bestMoves = moves.filter(move => 
                 move.san.includes('x') || // взятия
-                move.flags.includes('c')  // взятия
+                (move.flags && move.flags.includes('c'))  // взятия
             );
             
             // Сортировка взятий по ценности
@@ -529,7 +555,8 @@ class ChessGame {
         
         if (this.chess.game_over()) {
             if (this.chess.in_checkmate()) {
-                statusElement.textContent = 'Мат! Игра окончена.';
+                statusElement.textContent = this.chess.turn() === 'w' ? 
+                    'Мат! Черные выиграли.' : 'Мат! Белые выиграли.';
             } else {
                 statusElement.textContent = 'Ничья!';
             }
