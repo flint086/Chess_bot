@@ -101,7 +101,8 @@ button#surrender:hover {
     cursor: pointer;
     transition: background 0.2s;
     font-weight: bold;
-    font-family: "Segoe UI Symbol", "Arial Unicode MS", sans-serif;
+    font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+    color: #2c3e50;
 }
 
 .square.white {
@@ -128,6 +129,14 @@ button#surrender:hover {
 .square.check {
     background: #ff6b6b !important;
 }
+
+/* Стили для фигур через CSS */
+.piece-pw, .piece-pb { font-weight: bold; }
+.piece-rw, .piece-rb { font-weight: bold; }
+.piece-nw, .piece-nb { font-weight: bold; }
+.piece-bw, .piece-bb { font-weight: bold; }
+.piece-qw, .piece-qb { font-weight: bold; }
+.piece-kw, .piece-kb { font-weight: bold; }
 
 .moves-history {
     margin-top: 20px;
@@ -175,15 +184,6 @@ button#surrender:hover {
     color: #333;
 }
 
-.telegram-welcome {
-    animation: fadeIn 0.5s ease-in;
-}
-
-@keyframes fadeIn {
-    from { opacity: 0; transform: translateY(-10px); }
-    to { opacity: 1; transform: translateY(0); }
-}
-
 /* Адаптация для мобильных */
 @media (max-width: 768px) {
     .chess-board {
@@ -205,10 +205,6 @@ button#surrender:hover {
     button {
         width: 200px;
     }
-    
-    h1 {
-        font-size: 2em;
-    }
 }
 
 @media (max-width: 400px) {
@@ -221,42 +217,5 @@ button#surrender:hover {
         width: 35px;
         height: 35px;
         font-size: 20px;
-    }
-    
-    .controls {
-        flex-direction: column;
-    }
-    
-    button {
-        width: 100%;
-        margin: 2px 0;
-        padding: 8px 12px;
-        font-size: 14px;
-    }
-    
-    .game-info {
-        padding: 10px;
-        font-size: 14px;
-    }
-}
-
-@media (max-width: 350px) {
-    .chess-board {
-        grid-template-columns: repeat(8, 30px);
-        grid-template-rows: repeat(8, 30px);
-    }
-    
-    .square {
-        width: 30px;
-        height: 30px;
-        font-size: 16px;
-    }
-    
-    body {
-        padding: 10px;
-    }
-    
-    .container {
-        padding: 15px;
     }
 }
