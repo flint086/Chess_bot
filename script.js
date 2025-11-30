@@ -1,13 +1,20 @@
 // == ШАХМАТЫ В TELEGRAM ==
-// Версия: 1.0.0
+// Версия: 1.1.0
 // Автор: ChessBot
 // Дата: 2024
+// История версий:
+// 1.0.0 - Базовая версия игры
+// 1.1.0 - Исправлено зависание бота при превращении пешек + добавлена система версий
 
 // Telegram Web App Integration
 class TelegramIntegration {
     constructor() {
         this.isTelegram = false;
-        this.version = "1.0.0";
+        this.version = "1.1.0";
+        this.versionHistory = {
+            "1.0.0": "Базовая версия игры",
+            "1.1.0": "Исправлено зависание бота при превращении пешек + добавлена система версий"
+        };
         this.init();
     }
 
@@ -61,11 +68,43 @@ class TelegramIntegration {
             z-index: 1000;
             font-family: Arial, sans-serif;
             pointer-events: none;
+            cursor: pointer;
         `;
+        versionElement.title = 'Нажмите для информации о версии';
         versionElement.textContent = `v${this.version}`;
+        
+        // Добавляем возможность посмотреть историю версий
+        versionElement.addEventListener('click', () => {
+            this.showVersionInfo();
+        });
+        
         document.body.appendChild(versionElement);
         
         console.log(`♟️ Chess Bot v${this.version} initialized`);
+        console.log(`📝 ${this.versionHistory[this.version]}`);
+    }
+
+    showVersionInfo() {
+        let infoText = `Шахматы v${this.version}\n\nИстория версий:\n`;
+        for (const [version, description] of Object.entries(this.versionHistory)) {
+            infoText += `\n${version} - ${description}`;
+        }
+        alert(infoText);
+    }
+
+    // Метод для обновления версии (будет вызываться при изменениях)
+    updateVersion(newVersion, description) {
+        this.version = newVersion;
+        this.versionHistory[newVersion] = description;
+        
+        // Обновляем отображение
+        const versionElement = document.getElementById('app-version');
+        if (versionElement) {
+            versionElement.textContent = `v${newVersion}`;
+        }
+        
+        console.log(`🔄 Версия обновлена до v${newVersion}`);
+        console.log(`📝 ${description}`);
     }
 }
 
