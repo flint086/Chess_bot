@@ -22,7 +22,9 @@
             <div id="turn"></div>
         </div>
 
-        <div class="chess-board" id="board"></div>
+        <div class="chess-board" id="board">
+            <!-- Доска будет создана через JavaScript -->
+        </div>
 
         <div class="moves-history">
             <h3>История ходов:</h3>
@@ -31,13 +33,17 @@
 
         <div class="instructions">
             <h3>Как играть:</h3>
-            <p>• Кликните на фигуру чтобы выбрать</p>
-            <p>• Кликните на клетку для хода</p>
+            <p>• Кликните на фигуру чтобы выбрать (белые фигуры)</p>
+            <p>• Подсвеченные клетки - возможные ходы</p>
+            <p>• Зеленые - пустые клетки, красные - взятия</p>
             <p>• Вы играете белыми против бота</p>
         </div>
     </div>
 
+    <!-- Шахматная библиотека -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/chess.js/0.10.3/chess.min.js"></script>
+    
+    <!-- Наш основной код -->
     <script src="script.js"></script>
 </body>
 </html>
