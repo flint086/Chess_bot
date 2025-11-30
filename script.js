@@ -249,43 +249,86 @@ class ChessGame {
         this.clearHighlights();
     }
 
-    async makeMove(from, to) {
-        try {
-            const move = this.chess.move({ from, to, promotion: 'q' });
+	async makeMove(from, to) {
+		try {
+			let promotion = null;
+        
+			// Проверяем превращение пешки
+			const piece = this.chess.get(from);
+			if (piece && piece.type === 'p') {
+				const targetRank = to[1]; // цифра (1 или 8)
+				if ((piece.color === 'w' && targetRank === '8') || 
+					(piece.color === 'b' && targetRank === '1')) {
+					// Пешка дошла до конца - предлагаем выбор превращения
+					promotion = this.choosePromotionForPlayer();
+				}
+			}
+        
+			const moveConfig = { from, to };
+			if (promotion) {
+				moveConfig.promotion = promotion;
+			}
+        
+			const move = this.chess.move(moveConfig);
+        
+			if (move) {
+				this.movesHistory.push(move.san);
+				this.updateMovesList();
+				this.clearSelection();
+				this.updateGame();
             
-            if (move) {
-                this.movesHistory.push(move.san);
-                this.updateMovesList();
-                this.clearSelection();
-                this.updateGame();
-                
-                if (!this.chess.game_over() && this.chess.turn() === 'b') {
-                    this.isPlayerTurn = false;
-                    await this.makeBotMove();
-                }
-            }
-        } catch (e) {
-            console.error('Invalid move:', e);
-        }
-    }
+				if (!this.chess.game_over() && this.chess.turn() === 'b') {
+					this.isPlayerTurn = false;
+					await this.makeBotMove();
+				}
+			}
+		} catch (e) {
+			console.error('Invalid move:', e);
+		}
+	}
 
-    async makeBotMove() {
-        this.updateStatus();
+	choosePromotionForPlayer() {
+		// Для игрока можно сделать всплывающее окно с выбором,
+		// но для простоты тоже выбираем ферзя
+		return 'q';
+	}
+
+	async makeBotMove() {
+		this.updateStatus();
+    
+		await new Promise(resolve => setTimeout(resolve, this.botThinkingTime));
+    
+		const moves = this.chess.moves({ verbose: true });
+		if (moves.length > 0) {
+			const bestMove = this.getBestMove(moves);
         
-        // Время思考 в зависимости от сложности
-        await new Promise(resolve => setTimeout(resolve, this.botThinkingTime));
+			// Для ходов с превращением выбираем оптимальную фигуру
+			if (bestMove.flags.includes('p')) { // promotion
+				bestMove.promotion = this.choosePromotion(bestMove);
+			}
         
-        const moves = this.chess.moves({ verbose: true });
-        if (moves.length > 0) {
-            const bestMove = this.getBestMove(moves);
-            this.chess.move(bestMove);
-            this.movesHistory.push(bestMove.san);
-            this.updateMovesList();
-        }
-        
-        this.isPlayerTurn = true;
-        this.updateGame();
-    }
+			this.chess.move(bestMove);
+			this.movesHistory.push(bestMove.san);
+			this.updateMovesList();
+		}
+    
+		this.isPlayerTurn = true;
+		this.updateGame();
+	}
+
+	choosePromotion(move) {
+		// Бот всегда выбирает ферзя при превращении - это сильнейший выбор
+		// Кроме случаев когда это приводит к немедленному пату
+		const testBoard = new Chess(this.chess.fen());
+		testBoard.move({ from: move.from, to: move.to, promotion: 'q' });
+    
+		if (!testBoard.isStalemate() && !testBoard.isDraw()) {
+			return 'q'; // Ферзь - лучший выбор
+		}
+    
+		// Если ферзь приводит к пату, выбираем ладью
+		return 'r';
+	}
 
     getBestMove(moves) {
         switch(this.difficulty) {
