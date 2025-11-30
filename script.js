@@ -1,3 +1,92 @@
+// Telegram Web App Integration
+class TelegramIntegration {
+    constructor() {
+        this.isTelegram = false;
+        this.init();
+    }
+
+    init() {
+        // Проверяем если открыто в Telegram Web App
+        if (window.Telegram && Telegram.WebApp) {
+            this.isTelegram = true;
+            this.setupTelegram();
+        }
+    }
+
+    setupTelegram() {
+        const webApp = Telegram.WebApp;
+        
+        // Расширяем на весь экран
+        webApp.expand();
+        
+        // Включаем подтверждение закрытия
+        webApp.enableClosingConfirmation();
+        
+        // Настраиваем основную кнопку
+        webApp.MainButton.setText("🔄 Новая игра");
+        webApp.MainButton.color = "#4CAF50";
+        webApp.MainButton.hide();
+        
+        // Обработчик клика по кнопке
+        webApp.MainButton.onClick(() => {
+            window.location.reload();
+        });
+        
+        // Получаем данные пользователя
+        const user = webApp.initDataUnsafe.user;
+        if (user) {
+            this.showUserWelcome(user);
+        }
+        
+        console.log('Telegram Web App initialized');
+    }
+
+    showUserWelcome(user) {
+        const welcomeElement = document.createElement('div');
+        welcomeElement.className = 'telegram-welcome';
+        welcomeElement.style.cssText = `
+            text-align: center; 
+            margin: 10px 0; 
+            padding: 12px; 
+            background: linear-gradient(135deg, #667eea, #764ba2);
+            color: white;
+            border-radius: 10px;
+            font-weight: bold;
+            box-shadow: 0 3px 10px rgba(0,0,0,0.2);
+        `;
+        welcomeElement.innerHTML = `👋 Привет, ${user.first_name}! Добро пожаловать в шахматы! 🎮`;
+        
+        const container = document.querySelector('.container');
+        if (container) {
+            const header = container.querySelector('header');
+            if (header) {
+                header.parentNode.insertBefore(welcomeElement, header.nextSibling);
+            }
+        }
+    }
+
+    showMainButton() {
+        if (this.isTelegram && Telegram.WebApp) {
+            Telegram.WebApp.MainButton.show();
+        }
+    }
+
+    hideMainButton() {
+        if (this.isTelegram && Telegram.WebApp) {
+            Telegram.WebApp.MainButton.hide();
+        }
+    }
+
+    setButtonText(text) {
+        if (this.isTelegram && Telegram.WebApp) {
+            Telegram.WebApp.MainButton.setText(text);
+        }
+    }
+}
+
+// Инициализируем Telegram интеграцию
+const telegramApp = new TelegramIntegration();
+
 class ChessGame {
     constructor() {
         this.chess = new Chess();
@@ -10,6 +99,22 @@ class ChessGame {
         this.initializeBoard();
         this.bindEvents();
         this.updateGame();
+        this.setupTelegramIntegration();
+    }
+
+    setupTelegramIntegration() {
+        // Показываем кнопку Telegram когда игра завершена
+        const originalUpdateStatus = this.updateStatus;
+        this.updateStatus = () => {
+            originalUpdateStatus.call(this);
+            
+            if (this.chess.game_over()) {
+                telegramApp.setButtonText("🎮 Новая игра");
+                telegramApp.showMainButton();
+            } else {
+                telegramApp.hideMainButton();
+            }
+        };
     }
 
     initializeBoard() {
@@ -61,7 +166,10 @@ class ChessGame {
 
     updatePieces() {
         const squares = document.querySelectorAll('.square');
-        squares.forEach(square => square.textContent = '');
+        squares.forEach(square => {
+            square.textContent = '';
+            square.classList.remove('check');
+        });
         
         this.chess.board().forEach((piece, index) => {
             if (piece) {
@@ -117,6 +225,11 @@ class ChessGame {
                 this.handleSquareClick(e.target.dataset.square);
             }
         });
+
+        // Скрываем кнопки управления если в Telegram
+        if (telegramApp.isTelegram) {
+            document.getElementById('surrender').style.display = 'none';
+        }
     }
 
     handleSquareClick(squareName) {
@@ -156,7 +269,7 @@ class ChessGame {
 
     clearHighlights() {
         document.querySelectorAll('.square').forEach(square => {
-            square.classList.remove('selected', 'legal-move', 'check');
+            square.classList.remove('selected', 'legal-move');
         });
     }
 
@@ -188,8 +301,11 @@ class ChessGame {
     }
 
     async makeBotMove() {
+        // Показываем статус "бот думает"
+        this.updateStatus();
+        
         // Имитация задержки для "думающего" бота
-        await new Promise(resolve => setTimeout(resolve, 1000));
+        await new Promise(resolve => setTimeout(resolve, 800 + Math.random() * 700));
         
         const moves = this.chess.moves();
         if (moves.length > 0) {
@@ -198,6 +314,14 @@ class ChessGame {
                 move.includes('+') || move.includes('x')
             );
             
+            // Если нет шахов/взятий, ищем хорошие ходы
+            if (bestMoves.length === 0) {
+                bestMoves = moves.filter(move => 
+                    !move.includes('-') // избегаем пассивных ходов
+                );
+            }
+            
+            // Если все ходы плохие, берем случайный
             if (bestMoves.length === 0) {
                 bestMoves = moves;
             }
@@ -224,18 +348,35 @@ class ChessGame {
         if (this.chess.game_over()) {
             if (this.chess.in_checkmate()) {
                 statusElement.textContent = this.chess.turn() === 'w' ? 
-                    '⚡ Мат! Победил бот!' : '⚡ Мат! Победили белые!';
+                    '⚡ Мат! Победил бот! 🤖' : '⚡ Мат! Победили белые! 🎉';
+                statusElement.style.color = '#d32f2f';
             } else if (this.chess.in_draw()) {
                 statusElement.textContent = '🤝 Ничья!';
+                statusElement.style.color = '#ff9800';
             } else if (this.chess.in_stalemate()) {
                 statusElement.textContent = '🤝 Пат! Ничья!';
+                statusElement.style.color = '#ff9800';
+            }
+            
+            // Показываем кнопку новой игры в Telegram
+            if (telegramApp.isTelegram) {
+                telegramApp.setButtonText("🔄 Новая игра");
+                telegramApp.showMainButton();
             }
         } else {
             statusElement.textContent = this.isPlayerTurn ? 
                 '✅ Ваш ход' : '🤖 Думает бот...';
+            statusElement.style.color = '#2e7d32';
         }
         
-        turnElement.textContent = `Ход: ${this.chess.turn() === 'w' ? 'Белые' : 'Черные'}`;
+        turnElement.textContent = `Ход: ${this.chess.turn() === 'w' ? '⚪ Белые' : '⚫ Черные'}`;
+        
+        // Обновляем заголовок для Telegram
+        if (telegramApp.isTelegram) {
+            document.title = this.chess.game_over() ? 
+                'Шахматы - Игра завершена' : 
+                `Шахматы - ${this.isPlayerTurn ? 'Ваш ход' : 'Ход бота'}`;
+        }
     }
 
     updateMovesList() {
@@ -252,6 +393,9 @@ class ChessGame {
             moveElement.textContent = `${moveNumber}. ${whiteMove} ${blackMove}`;
             movesList.appendChild(moveElement);
         }
+        
+        // Прокручиваем к последним ходам
+        movesList.scrollTop = movesList.scrollHeight;
     }
 
     newGame() {
@@ -263,6 +407,9 @@ class ChessGame {
         this.clearHighlights();
         this.updateGame();
         this.updateMovesList();
+        
+        // Скрываем кнопку Telegram
+        telegramApp.hideMainButton();
     }
 
     flipBoard() {
@@ -276,11 +423,75 @@ class ChessGame {
             this.chess.reset();
             this.newGame();
             document.getElementById('status').textContent = '🏳️ Вы сдались!';
+            document.getElementById('status').style.color = '#f44336';
         }
     }
 }
 
+// Стили для Telegram Web App
+const telegramStyles = `
+    .telegram-welcome {
+        animation: fadeIn 0.5s ease-in;
+    }
+    
+    @keyframes fadeIn {
+        from { opacity: 0; transform: translateY(-10px); }
+        to { opacity: 1; transform: translateY(0); }
+    }
+    
+    /* Адаптация для маленьких экранов Telegram */
+    @media (max-width: 400px) {
+        .chess-board {
+            grid-template-columns: repeat(8, 35px) !important;
+            grid-template-rows: repeat(8, 35px) !important;
+        }
+        
+        .square {
+            width: 35px !important;
+            height: 35px !important;
+            font-size: 25px !important;
+        }
+        
+        .controls {
+            flex-direction: column;
+        }
+        
+        button {
+            width: 100%;
+            margin: 2px 0;
+        }
+    }
+`;
+
+// Добавляем стили в документ
+const styleSheet = document.createElement("style");
+styleSheet.textContent = telegramStyles;
+document.head.appendChild(styleSheet);
+
 // Запуск игры когда страница загружена
 document.addEventListener('DOMContentLoaded', () => {
     new ChessGame();
+    
+    // Скрываем кнопку сдачи если в Telegram
+    if (telegramApp.isTelegram) {
+        const surrenderBtn = document.getElementById('surrender');
+        if (surrenderBtn) {
+            surrenderBtn.style.display = 'none';
+        }
+    }
 });
+
+// Обработчик для отправки статистики в Telegram (опционально)
+function sendGameResultToTelegram(result) {
+    if (telegramApp.isTelegram && Telegram.WebApp) {
+        const data = {
+            action: 'game_completed',
+            result: result,
+            moves: document.getElementById('movesList').children.length,
+            timestamp: new Date().toISOString()
+        };
+        
+        // Отправляем данные в бота
+        Telegram.WebApp.sendData(JSON.stringify(data));
+    }
+}
