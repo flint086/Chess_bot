@@ -37,16 +37,11 @@ class TelegramIntegration {
             Telegram.WebApp.MainButton.hide();
         }
     }
-
-    setButtonText(text) {
-        if (this.isTelegram && Telegram.WebApp) {
-            Telegram.WebApp.MainButton.setText(text);
-        }
-    }
 }
 
 const telegramApp = new TelegramIntegration();
 
+// ШАХМАТНАЯ ИГРА
 class ChessGame {
     constructor() {
         this.chess = new Chess();
@@ -54,30 +49,19 @@ class ChessGame {
         this.legalMoves = [];
         this.isPlayerTurn = true;
         this.movesHistory = [];
-        this.boardFlipped = false;
         
         this.initializeBoard();
         this.bindEvents();
         this.updateGame();
-        this.setupTelegramIntegration();
-    }
-
-    setupTelegramIntegration() {
-        const originalUpdateStatus = this.updateStatus;
-        this.updateStatus = () => {
-            originalUpdateStatus.call(this);
-            
-            if (this.chess.game_over()) {
-                telegramApp.setButtonText("🎮 Новая игра");
-                telegramApp.showMainButton();
-            } else {
-                telegramApp.hideMainButton();
-            }
-        };
     }
 
     initializeBoard() {
         const board = document.getElementById('board');
+        if (!board) {
+            console.error('Board element not found!');
+            return;
+        }
+        
         board.innerHTML = '';
         
         for (let i = 0; i < 64; i++) {
@@ -99,30 +83,32 @@ class ChessGame {
         const ranks = '87654321';
         const row = Math.floor(index / 8);
         const col = index % 8;
-        
-        if (this.boardFlipped) {
-            return files[7 - col] + ranks[7 - row];
-        }
         return files[col] + ranks[row];
     }
 
     updatePieces() {
+        console.log('Updating pieces...');
+        
         const squares = document.querySelectorAll('.square');
         squares.forEach(square => {
             square.textContent = '';
-            square.className = square.className.replace(/ piece-\w+/g, '');
-            square.classList.remove('check');
+            square.classList.remove('check', 'selected', 'legal-move', 'legal-capture');
         });
         
-        this.chess.board().forEach((piece, index) => {
-            if (piece) {
-                const squareName = this.getSquareName(index);
-                const squareElement = document.querySelector(`[data-square="${squareName}"]`);
-                if (squareElement) {
-                    this.renderPiece(squareElement, piece);
+        const board = this.chess.board();
+        for (let i = 0; i < 8; i++) {
+            for (let j = 0; j < 8; j++) {
+                const piece = board[i][j];
+                if (piece) {
+                    const squareName = this.getSquareName(i * 8 + j);
+                    const squareElement = document.querySelector(`[data-square="${squareName}"]`);
+                    if (squareElement) {
+                        squareElement.textContent = this.getPieceSymbol(piece);
+                        console.log(`Set ${piece.type}${piece.color} at ${squareName}: ${squareElement.textContent}`);
+                    }
                 }
             }
-        });
+        }
 
         if (this.chess.in_check()) {
             const kingColor = this.chess.turn();
@@ -134,20 +120,12 @@ class ChessGame {
         }
     }
 
-    renderPiece(squareElement, piece) {
-        // Используем CSS-классы вместо символов
-        const pieceClass = `piece-${piece.type}${piece.color}`;
-        squareElement.classList.add(pieceClass);
-        squareElement.textContent = this.getPieceText(piece);
-    }
-
-    getPieceText(piece) {
-        // Простые буквы как fallback
-        const letters = {
-            'p': 'P', 'r': 'R', 'n': 'N', 'b': 'B', 'q': 'Q', 'k': 'K',
-            'P': 'P', 'R': 'R', 'N': 'N', 'B': 'B', 'Q': 'Q', 'K': 'K'
+    getPieceSymbol(piece) {
+        const symbols = {
+            'p': '♟', 'r': '♜', 'n': '♞', 'b': '♝', 'q': '♛', 'k': '♚',
+            'P': '♙', 'R': '♖', 'N': '♘', 'B': '♗', 'Q': '♕', 'K': '♔'
         };
-        return letters[piece.type];
+        return symbols[piece.type] || '?';
     }
 
     findKingSquare(color) {
@@ -175,10 +153,6 @@ class ChessGame {
                 this.handleSquareClick(e.target.dataset.square);
             }
         });
-
-        if (telegramApp.isTelegram) {
-            document.getElementById('surrender').style.display = 'none';
-        }
     }
 
     handleSquareClick(squareName) {
@@ -197,8 +171,6 @@ class ChessGame {
         else {
             this.clearSelection();
         }
-        
-        this.updatePieces();
     }
 
     highlightLegalMoves() {
@@ -251,23 +223,11 @@ class ChessGame {
 
     async makeBotMove() {
         this.updateStatus();
-        await new Promise(resolve => setTimeout(resolve, 800 + Math.random() * 700));
+        await new Promise(resolve => setTimeout(resolve, 1000));
         
         const moves = this.chess.moves();
         if (moves.length > 0) {
-            let bestMoves = moves.filter(move => 
-                move.includes('+') || move.includes('x')
-            );
-            
-            if (bestMoves.length === 0) {
-                bestMoves = moves.filter(move => !move.includes('-'));
-            }
-            
-            if (bestMoves.length === 0) {
-                bestMoves = moves;
-            }
-            
-            const randomMove = bestMoves[Math.floor(Math.random() * bestMoves.length)];
+            const randomMove = moves[Math.floor(Math.random() * moves.length)];
             this.chess.move(randomMove);
             this.movesHistory.push(randomMove);
             this.updateMovesList();
@@ -286,34 +246,28 @@ class ChessGame {
         const statusElement = document.getElementById('status');
         const turnElement = document.getElementById('turn');
         
-        if (this.chess.game_over()) {
-            if (this.chess.in_checkmate()) {
-                statusElement.textContent = this.chess.turn() === 'w' ? 
-                    'Мат! Победил бот!' : 'Мат! Победили белые!';
-                statusElement.style.color = '#d32f2f';
-            } else if (this.chess.in_draw()) {
-                statusElement.textContent = 'Ничья!';
-                statusElement.style.color = '#ff9800';
-            } else if (this.chess.in_stalemate()) {
-                statusElement.textContent = 'Пат! Ничья!';
-                statusElement.style.color = '#ff9800';
-            }
-            
-            if (telegramApp.isTelegram) {
-                telegramApp.setButtonText("Новая игра");
-                telegramApp.showMainButton();
-            }
-        } else {
-            statusElement.textContent = this.isPlayerTurn ? 
-                'Ваш ход' : 'Думает бот...';
-            statusElement.style.color = '#2e7d32';
+        if (!statusElement || !turnElement) {
+            console.error('Status elements not found!');
+            return;
         }
         
-        turnElement.textContent = `Ход: ${this.chess.turn() === 'w' ? 'Белые' : 'Черные'}`;
+        if (this.chess.game_over()) {
+            if (this.chess.in_checkmate()) {
+                statusElement.textContent = 'Мат! Игра окончена.';
+            } else {
+                statusElement.textContent = 'Ничья!';
+            }
+        } else {
+            statusElement.textContent = this.isPlayerTurn ? 'Ваш ход' : 'Ход бота...';
+        }
+        
+        turnElement.textContent = `Ход: ${this.chess.turn() === 'w' ? 'белые' : 'черные'}`;
     }
 
     updateMovesList() {
         const movesList = document.getElementById('movesList');
+        if (!movesList) return;
+        
         movesList.innerHTML = '';
         
         for (let i = 0; i < this.movesHistory.length; i += 2) {
@@ -326,8 +280,6 @@ class ChessGame {
             moveElement.textContent = `${moveNumber}. ${whiteMove} ${blackMove}`;
             movesList.appendChild(moveElement);
         }
-        
-        movesList.scrollTop = movesList.scrollHeight;
     }
 
     newGame() {
@@ -339,30 +291,23 @@ class ChessGame {
         this.clearHighlights();
         this.updateGame();
         this.updateMovesList();
-        telegramApp.hideMainButton();
     }
 
     flipBoard() {
-        this.boardFlipped = !this.boardFlipped;
-        this.initializeBoard();
-        this.updateGame();
+        // Простая реализация переворота доски
+        alert('Переворот доски в разработке');
     }
 
     surrender() {
         if (confirm('Сдаться?')) {
-            this.chess.reset();
             this.newGame();
             document.getElementById('status').textContent = 'Вы сдались!';
-            document.getElementById('status').style.color = '#f44336';
         }
     }
 }
 
-// Запуск игры
-document.addEventListener('DOMContentLoaded', () => {
+// Запуск игры когда страница загружена
+document.addEventListener('DOMContentLoaded', function() {
+    console.log('DOM loaded, starting chess game...');
     new ChessGame();
-    
-    if (telegramApp.isTelegram) {
-        document.getElementById('surrender').style.display = 'none';
-    }
 });
