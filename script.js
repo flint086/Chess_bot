@@ -24,25 +24,6 @@ class TelegramIntegration {
         webApp.MainButton.onClick(() => {
             window.location.reload();
         });
-        
-        const user = webApp.initDataUnsafe.user;
-        if (user) {
-            this.showUserWelcome(user);
-        }
-    }
-
-    showUserWelcome(user) {
-        const welcomeElement = document.createElement('div');
-        welcomeElement.className = 'telegram-welcome';
-        welcomeElement.innerHTML = `👋 Привет, ${user.first_name}! Добро пожаловать в шахматы! 🎮`;
-        
-        const container = document.querySelector('.container');
-        if (container) {
-            const header = container.querySelector('header');
-            if (header) {
-                header.parentNode.insertBefore(welcomeElement, header.nextSibling);
-            }
-        }
     }
 
     showMainButton() {
@@ -74,28 +55,11 @@ class ChessGame {
         this.isPlayerTurn = true;
         this.movesHistory = [];
         this.boardFlipped = false;
-        this.useLetters = false; // Флаг для использования букв вместо символов
         
-        this.checkSymbolSupport();
         this.initializeBoard();
         this.bindEvents();
         this.updateGame();
         this.setupTelegramIntegration();
-    }
-
-    checkSymbolSupport() {
-        // Проверяем поддержку Unicode символов
-        const testSymbol = '♔';
-        const canvas = document.createElement('canvas');
-        const ctx = canvas.getContext('2d');
-        ctx.font = '16px Arial';
-        const metrics = ctx.measureText(testSymbol);
-        
-        // Если символ не отображается (ширина 0), используем буквы
-        if (metrics.width === 0) {
-            this.useLetters = true;
-            console.log('Unicode symbols not supported, using letters');
-        }
     }
 
     setupTelegramIntegration() {
@@ -146,8 +110,8 @@ class ChessGame {
         const squares = document.querySelectorAll('.square');
         squares.forEach(square => {
             square.textContent = '';
+            square.className = square.className.replace(/ piece-\w+/g, '');
             square.classList.remove('check');
-            square.style.backgroundImage = 'none';
         });
         
         this.chess.board().forEach((piece, index) => {
@@ -171,25 +135,19 @@ class ChessGame {
     }
 
     renderPiece(squareElement, piece) {
-        if (this.useLetters) {
-            // Используем буквы если символы не поддерживаются
-            const letterPieces = {
-                'p': 'p', 'r': 'r', 'n': 'n', 'b': 'b', 'q': 'q', 'k': 'k',
-                'P': 'P', 'R': 'R', 'N': 'N', 'B': 'B', 'Q': 'Q', 'K': 'K'
-            };
-            squareElement.textContent = letterPieces[piece.type];
-            squareElement.style.color = piece.color === 'w' ? '#2c3e50' : '#2c3e50';
-            squareElement.style.fontWeight = 'bold';
-            squareElement.style.fontSize = '24px';
-        } else {
-            // Используем Unicode символы
-            const symbols = {
-                'p': '♟', 'r': '♜', 'n': '♞', 'b': '♝', 'q': '♛', 'k': '♚',
-                'P': '♙', 'R': '♖', 'N': '♘', 'B': '♗', 'Q': '♕', 'K': '♔'
-            };
-            squareElement.textContent = symbols[piece.type];
-            squareElement.style.color = piece.color === 'w' ? '#2c3e50' : '#2c3e50';
-        }
+        // Используем CSS-классы вместо символов
+        const pieceClass = `piece-${piece.type}${piece.color}`;
+        squareElement.classList.add(pieceClass);
+        squareElement.textContent = this.getPieceText(piece);
+    }
+
+    getPieceText(piece) {
+        // Простые буквы как fallback
+        const letters = {
+            'p': 'P', 'r': 'R', 'n': 'N', 'b': 'B', 'q': 'Q', 'k': 'K',
+            'P': 'P', 'R': 'R', 'N': 'N', 'B': 'B', 'Q': 'Q', 'K': 'K'
+        };
+        return letters[piece.type];
     }
 
     findKingSquare(color) {
@@ -331,33 +289,27 @@ class ChessGame {
         if (this.chess.game_over()) {
             if (this.chess.in_checkmate()) {
                 statusElement.textContent = this.chess.turn() === 'w' ? 
-                    '⚡ Мат! Победил бот! 🤖' : '⚡ Мат! Победили белые! 🎉';
+                    'Мат! Победил бот!' : 'Мат! Победили белые!';
                 statusElement.style.color = '#d32f2f';
             } else if (this.chess.in_draw()) {
-                statusElement.textContent = '🤝 Ничья!';
+                statusElement.textContent = 'Ничья!';
                 statusElement.style.color = '#ff9800';
             } else if (this.chess.in_stalemate()) {
-                statusElement.textContent = '🤝 Пат! Ничья!';
+                statusElement.textContent = 'Пат! Ничья!';
                 statusElement.style.color = '#ff9800';
             }
             
             if (telegramApp.isTelegram) {
-                telegramApp.setButtonText("🔄 Новая игра");
+                telegramApp.setButtonText("Новая игра");
                 telegramApp.showMainButton();
             }
         } else {
             statusElement.textContent = this.isPlayerTurn ? 
-                '✅ Ваш ход' : '🤖 Думает бот...';
+                'Ваш ход' : 'Думает бот...';
             statusElement.style.color = '#2e7d32';
         }
         
-        turnElement.textContent = `Ход: ${this.chess.turn() === 'w' ? '⚪ Белые' : '⚫ Черные'}`;
-        
-        if (telegramApp.isTelegram) {
-            document.title = this.chess.game_over() ? 
-                'Шахматы - Игра завершена' : 
-                `Шахматы - ${this.isPlayerTurn ? 'Ваш ход' : 'Ход бота'}`;
-        }
+        turnElement.textContent = `Ход: ${this.chess.turn() === 'w' ? 'Белые' : 'Черные'}`;
     }
 
     updateMovesList() {
@@ -400,79 +352,17 @@ class ChessGame {
         if (confirm('Сдаться?')) {
             this.chess.reset();
             this.newGame();
-            document.getElementById('status').textContent = '🏳️ Вы сдались!';
+            document.getElementById('status').textContent = 'Вы сдались!';
             document.getElementById('status').style.color = '#f44336';
         }
     }
 }
 
-// Стили для лучшего отображения
-const telegramStyles = `
-    .square {
-        font-weight: bold;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
-    }
-    
-    .square.letter-piece {
-        font-size: 24px;
-        font-weight: bold;
-    }
-    
-    .telegram-welcome {
-        text-align: center; 
-        margin: 10px 0; 
-        padding: 12px; 
-        background: linear-gradient(135deg, #667eea, #764ba2);
-        color: white;
-        border-radius: 10px;
-        font-weight: bold;
-        box-shadow: 0 3px 10px rgba(0,0,0,0.2);
-        animation: fadeIn 0.5s ease-in;
-    }
-    
-    @keyframes fadeIn {
-        from { opacity: 0; transform: translateY(-10px); }
-        to { opacity: 1; transform: translateY(0); }
-    }
-    
-    .legal-capture {
-        background: #ff6b6b !important;
-        border: 2px solid #d32f2f;
-    }
-    
-    @media (max-width: 400px) {
-        .chess-board {
-            grid-template-columns: repeat(8, 35px) !important;
-            grid-template-rows: repeat(8, 35px) !important;
-        }
-        
-        .square {
-            width: 35px !important;
-            height: 35px !important;
-            font-size: 20px !important;
-        }
-        
-        .square.letter-piece {
-            font-size: 18px !important;
-        }
-    }
-`;
-
-const styleSheet = document.createElement("style");
-styleSheet.textContent = telegramStyles;
-document.head.appendChild(styleSheet);
-
+// Запуск игры
 document.addEventListener('DOMContentLoaded', () => {
     new ChessGame();
     
     if (telegramApp.isTelegram) {
-        const surrenderBtn = document.getElementById('surrender');
-        if (surrenderBtn) {
-            surrenderBtn.style.display = 'none';
-        }
-        document.body.style.padding = '10px';
+        document.getElementById('surrender').style.display = 'none';
     }
 });
