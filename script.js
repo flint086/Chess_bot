@@ -176,7 +176,8 @@ class ChessGame {
                 const squareName = this.getSquareName(index);
                 const squareElement = document.querySelector(`[data-square="${squareName}"]`);
                 if (squareElement) {
-                    squareElement.textContent = this.getPieceEmoji(piece);
+                    squareElement.textContent = this.getPieceSymbol(piece);
+                    squareElement.setAttribute('data-piece', piece.type + piece.color);
                 }
             }
         });
@@ -192,12 +193,37 @@ class ChessGame {
         }
     }
 
-    getPieceEmoji(piece) {
-        const pieces = {
-            'p': '♟', 'r': '♜', 'n': '♞', 'b': '♝', 'q': '♛', 'k': '♚',
-            'P': '♙', 'R': '♖', 'N': '♘', 'B': '♗', 'Q': '♕', 'K': '♔'
+    getPieceSymbol(piece) {
+        // Используем текстовые символы вместо эмодзи для совместимости
+        const symbols = {
+            // Черные фигуры
+            'p': '♟', // пешка
+            'r': '♜', // ладья
+            'n': '♞', // конь
+            'b': '♝', // слон
+            'q': '♛', // ферзь
+            'k': '♚', // король
+            // Белые фигуры
+            'P': '♙', // пешка
+            'R': '♖', // ладья
+            'N': '♘', // конь
+            'B': '♗', // слон
+            'Q': '♕', // ферзь
+            'K': '♔'  // король
         };
-        return pieces[piece.type] || '';
+        
+        const symbol = symbols[piece.type] || '';
+        
+        // Fallback на буквы если символы не отображаются
+        if (!symbol || symbol === piece.type) {
+            const letterSymbols = {
+                'p': 'p', 'r': 'r', 'n': 'n', 'b': 'b', 'q': 'q', 'k': 'k',
+                'P': 'P', 'R': 'R', 'N': 'N', 'B': 'B', 'Q': 'Q', 'K': 'K'
+            };
+            return letterSymbols[piece.type] || '';
+        }
+        
+        return symbol;
     }
 
     findKingSquare(color) {
@@ -263,13 +289,19 @@ class ChessGame {
         
         this.legalMoves.forEach(move => {
             const squareElement = document.querySelector(`[data-square="${move.to}"]`);
-            squareElement.classList.add('legal-move');
+            if (this.chess.get(move.to)) {
+                // Если на клетке фигура противника - красная подсветка
+                squareElement.classList.add('legal-capture');
+            } else {
+                // Если пустая клетка - зеленая подсветка
+                squareElement.classList.add('legal-move');
+            }
         });
     }
 
     clearHighlights() {
         document.querySelectorAll('.square').forEach(square => {
-            square.classList.remove('selected', 'legal-move');
+            square.classList.remove('selected', 'legal-move', 'legal-capture');
         });
     }
 
@@ -439,6 +471,19 @@ const telegramStyles = `
         to { opacity: 1; transform: translateY(0); }
     }
     
+    .square {
+        font-weight: bold;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-family: "Segoe UI Symbol", "Arial Unicode MS", sans-serif;
+    }
+    
+    .legal-capture {
+        background: #ff6b6b !important;
+        border: 2px solid #d32f2f;
+    }
+    
     /* Адаптация для маленьких экранов Telegram */
     @media (max-width: 400px) {
         .chess-board {
@@ -449,7 +494,7 @@ const telegramStyles = `
         .square {
             width: 35px !important;
             height: 35px !important;
-            font-size: 25px !important;
+            font-size: 20px !important;
         }
         
         .controls {
@@ -459,6 +504,27 @@ const telegramStyles = `
         button {
             width: 100%;
             margin: 2px 0;
+            padding: 8px 12px;
+            font-size: 14px;
+        }
+        
+        .game-info {
+            padding: 10px;
+            font-size: 14px;
+        }
+    }
+    
+    /* Для очень маленьких экранов */
+    @media (max-width: 350px) {
+        .chess-board {
+            grid-template-columns: repeat(8, 30px) !important;
+            grid-template-rows: repeat(8, 30px) !important;
+        }
+        
+        .square {
+            width: 30px !important;
+            height: 30px !important;
+            font-size: 16px !important;
         }
     }
 `;
@@ -478,20 +544,25 @@ document.addEventListener('DOMContentLoaded', () => {
         if (surrenderBtn) {
             surrenderBtn.style.display = 'none';
         }
+        
+        // Добавляем дополнительный отступ для Telegram
+        document.body.style.padding = '10px';
     }
 });
 
-// Обработчик для отправки статистики в Telegram (опционально)
-function sendGameResultToTelegram(result) {
-    if (telegramApp.isTelegram && Telegram.WebApp) {
-        const data = {
-            action: 'game_completed',
-            result: result,
-            moves: document.getElementById('movesList').children.length,
-            timestamp: new Date().toISOString()
-        };
-        
-        // Отправляем данные в бота
-        Telegram.WebApp.sendData(JSON.stringify(data));
-    }
+// Функция для проверки отображения символов
+function testSymbols() {
+    const testSymbols = ['♟', '♜', '♞', '♝', '♛', '♚', '♙', '♖', '♘', '♗', '♕', '♔'];
+    const available = testSymbols.filter(symbol => {
+        const canvas = document.createElement('canvas');
+        const ctx = canvas.getContext('2d');
+        ctx.font = '16px Arial';
+        const metrics = ctx.measureText(symbol);
+        return metrics.width > 0;
+    });
+    console.log('Available symbols:', available);
+    return available.length > 0;
 }
+
+// Проверяем символы при загрузке
+setTimeout(testSymbols, 1000);
