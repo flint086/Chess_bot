@@ -1,7 +1,13 @@
+// == ШАХМАТЫ В TELEGRAM ==
+// Версия: 1.0.0
+// Автор: ChessBot
+// Дата: 2024
+
 // Telegram Web App Integration
 class TelegramIntegration {
     constructor() {
         this.isTelegram = false;
+        this.version = "1.0.0";
         this.init();
     }
 
@@ -10,6 +16,7 @@ class TelegramIntegration {
             this.isTelegram = true;
             this.setupTelegram();
         }
+        this.displayVersion();
     }
 
     setupTelegram() {
@@ -36,6 +43,29 @@ class TelegramIntegration {
         if (this.isTelegram && Telegram.WebApp) {
             Telegram.WebApp.MainButton.hide();
         }
+    }
+
+    displayVersion() {
+        // Создаем элемент для отображения версии
+        const versionElement = document.createElement('div');
+        versionElement.id = 'app-version';
+        versionElement.style.cssText = `
+            position: fixed;
+            bottom: 10px;
+            right: 10px;
+            background: rgba(0,0,0,0.7);
+            color: white;
+            padding: 4px 8px;
+            border-radius: 12px;
+            font-size: 11px;
+            z-index: 1000;
+            font-family: Arial, sans-serif;
+            pointer-events: none;
+        `;
+        versionElement.textContent = `v${this.version}`;
+        document.body.appendChild(versionElement);
+        
+        console.log(`♟️ Chess Bot v${this.version} initialized`);
     }
 }
 
