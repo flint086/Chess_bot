@@ -249,86 +249,134 @@ class ChessGame {
         this.clearHighlights();
     }
 
-	async makeMove(from, to) {
-		try {
-			let promotion = null;
+    async makeMove(from, to) {
+        try {
+            let promotion = null;
         
-			// Проверяем превращение пешки
-			const piece = this.chess.get(from);
-			if (piece && piece.type === 'p') {
-				const targetRank = to[1]; // цифра (1 или 8)
-				if ((piece.color === 'w' && targetRank === '8') || 
-					(piece.color === 'b' && targetRank === '1')) {
-					// Пешка дошла до конца - предлагаем выбор превращения
-					promotion = this.choosePromotionForPlayer();
-				}
-			}
+            // Проверяем превращение пешки
+            const piece = this.chess.get(from);
+            if (piece && piece.type === 'p') {
+                const targetRank = to[1]; // цифра (1 или 8)
+                if ((piece.color === 'w' && targetRank === '8') || 
+                    (piece.color === 'b' && targetRank === '1')) {
+                    // Пешка дошла до конца - предлагаем выбор превращения
+                    promotion = this.choosePromotionForPlayer();
+                }
+            }
         
-			const moveConfig = { from, to };
-			if (promotion) {
-				moveConfig.promotion = promotion;
-			}
+            const moveConfig = { from, to };
+            if (promotion) {
+                moveConfig.promotion = promotion;
+            }
         
-			const move = this.chess.move(moveConfig);
+            const move = this.chess.move(moveConfig);
         
-			if (move) {
-				this.movesHistory.push(move.san);
-				this.updateMovesList();
-				this.clearSelection();
-				this.updateGame();
+            if (move) {
+                this.movesHistory.push(move.san);
+                this.updateMovesList();
+                this.clearSelection();
+                this.updateGame();
             
-				if (!this.chess.game_over() && this.chess.turn() === 'b') {
-					this.isPlayerTurn = false;
-					await this.makeBotMove();
-				}
-			}
-		} catch (e) {
-			console.error('Invalid move:', e);
-		}
-	}
+                if (!this.chess.game_over() && this.chess.turn() === 'b') {
+                    this.isPlayerTurn = false;
+                    await this.makeBotMove();
+                }
+            } else {
+                console.error('Invalid move attempted:', from, to);
+                this.clearSelection();
+            }
+        } catch (e) {
+            console.error('Invalid move:', e);
+            this.clearSelection();
+        }
+    }
 
-	choosePromotionForPlayer() {
-		// Для игрока можно сделать всплывающее окно с выбором,
-		// но для простоты тоже выбираем ферзя
-		return 'q';
-	}
+    choosePromotionForPlayer() {
+        // Для игрока можно сделать всплывающее окно с выбором,
+        // но для простоты тоже выбираем ферзя
+        return 'q';
+    }
 
-	async makeBotMove() {
-		this.updateStatus();
+    async makeBotMove() {
+        this.updateStatus();
     
-		await new Promise(resolve => setTimeout(resolve, this.botThinkingTime));
-    
-		const moves = this.chess.moves({ verbose: true });
-		if (moves.length > 0) {
-			const bestMove = this.getBestMove(moves);
+        try {
+            await new Promise(resolve => setTimeout(resolve, this.botThinkingTime));
         
-			// Для ходов с превращением выбираем оптимальную фигуру
-			if (bestMove.flags.includes('p')) { // promotion
-				bestMove.promotion = this.choosePromotion(bestMove);
-			}
-        
-			this.chess.move(bestMove);
-			this.movesHistory.push(bestMove.san);
-			this.updateMovesList();
-		}
+            const moves = this.chess.moves({ verbose: true });
+            if (moves.length > 0) {
+                let bestMove = this.getBestMove(moves);
+            
+                // Для ходов с превращением выбираем оптимальную фигуру
+                if (bestMove.flags && bestMove.flags.includes('p')) {
+                    bestMove.promotion = this.choosePromotion(bestMove);
+                }
+            
+                // Создаем объект хода с правильными полями
+                const moveObj = {
+                    from: bestMove.from,
+                    to: bestMove.to
+                };
+            
+                if (bestMove.promotion) {
+                    moveObj.promotion = bestMove.promotion;
+                }
+            
+                const moveResult = this.chess.move(moveObj);
+            
+                if (moveResult) {
+                    this.movesHistory.push(moveResult.san);
+                    this.updateMovesList();
+                } else {
+                    console.error('Invalid bot move:', moveObj);
+                    // Если ход невалидный, делаем случайный ход
+                    const randomMove = moves[Math.floor(Math.random() * moves.length)];
+                    const fallbackMove = {
+                        from: randomMove.from,
+                        to: randomMove.to
+                    };
+                    this.chess.move(fallbackMove);
+                }
+            }
+        } catch (error) {
+            console.error('Error in bot move:', error);
+            // В случае ошибки пробуем сделать любой допустимый ход
+            try {
+                const moves = this.chess.moves({ verbose: true });
+                if (moves.length > 0) {
+                    const randomMove = moves[Math.floor(Math.random() * moves.length)];
+                    this.chess.move({ from: randomMove.from, to: randomMove.to });
+                }
+            } catch (fallbackError) {
+                console.error('Fallback move also failed:', fallbackError);
+            }
+        }
     
-		this.isPlayerTurn = true;
-		this.updateGame();
-	}
+        this.isPlayerTurn = true;
+        this.updateGame();
+    }
 
-	choosePromotion(move) {
-		// Бот всегда выбирает ферзя при превращении - это сильнейший выбор
-		// Кроме случаев когда это приводит к немедленному пату
-		const testBoard = new Chess(this.chess.fen());
-		testBoard.move({ from: move.from, to: move.to, promotion: 'q' });
-    
-		if (!testBoard.isStalemate() && !testBoard.isDraw()) {
-			return 'q'; // Ферзь - лучший выбор
-		}
-    
-		// Если ферзь приводит к пату, выбираем ладью
-		return 'r';
-	}
+    choosePromotion(move) {
+        try {
+            // Бот всегда выбирает ферзя при превращении - это сильнейший выбор
+            const testBoard = new Chess(this.chess.fen());
+            const testMove = testBoard.move({ 
+                from: move.from, 
+                to: move.to, 
+                promotion: 'q' 
+            });
+        
+            if (testMove && !testBoard.isStalemate() && !testBoard.isDraw()) {
+                return 'q'; // Ферзь - лучший выбор
+            }
+        
+            // Если ферзь приводит к пату или ошибке, выбираем ладью
+            return 'r';
+        } catch (error) {
+            // В случае ошибки выбираем ферзя (самый безопасный вариант)
+            return 'q';
+        }
+    }
 
     getBestMove(moves) {
         switch(this.difficulty) {
