@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>♟️ Шахматы</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>♟️ Шахматы</h1>
+            <div class="controls">
+                <button id="newGame">Новая игра</button>
+                <button id="flipBoard">Перевернуть доску</button>
+                <button id="surrender">Сдаться</button>
+            </div>
+        </header>
+
+        <div class="game-info">
+            <div id="status">Начните новую игру!</div>
+            <div id="turn"></div>
+        </div>
+
+        <div class="chess-board" id="board"></div>
+
+        <div class="moves-history">
+            <h3>История ходов:</h3>
+            <div id="movesList"></div>
+        </div>
+
+        <div class="instructions">
+            <h3>Как играть:</h3>
+            <p>• Кликните на фигуру чтобы выбрать</p>
+            <p>• Кликните на клетку для хода</p>
+            <p>• Вы играете белыми против бота</p>
+        </div>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/chess.js/0.10.3/chess.min.js"></script>
+    <script src="script.js"></script>
+</body>
+</html>
