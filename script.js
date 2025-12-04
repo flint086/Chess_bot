@@ -1,5 +1,5 @@
 // == ШАХМАТЫ В TELEGRAM ==
-// Версия: 2.1.2
+// Версия: 2.1.3
 // Автор: ChessBot
 // Дата: 2024
 // История версий:
@@ -12,12 +12,13 @@
 // 2.1.0 - Улучшен режим двух игроков: автоматическое определение чей ход
 // 2.1.1 - Исправлена прокрутка страницы после хода
 // 2.1.2 - Исправлена блокировка ходов фигур
+// 2.1.3 - Исправлен переход между режимами игры
 
 // Telegram Web App Integration
 class TelegramIntegration {
     constructor() {
         this.isTelegram = false;
-        this.version = "2.1.2";
+        this.version = "2.1.3";
         this.versionHistory = {
             "1.0.0": "Базовая версия игры",
             "1.1.0": "Исправлено зависание бота при превращении пешек", 
@@ -27,7 +28,8 @@ class TelegramIntegration {
             "2.0.0": "Добавлен режим игры для двух игроков",
             "2.1.0": "Улучшен режим двух игроков: автоматическое определение чей ход",
             "2.1.1": "Исправлена прокрутка страницы после хода",
-            "2.1.2": "Исправлена блокировка ходов фигур"
+            "2.1.2": "Исправлена блокировка ходов фигур",
+            "2.1.3": "Исправлен переход между режимами игры"
         };
         this.buildDate = new Date().toISOString().split('T')[0];
         this.init();
@@ -186,6 +188,7 @@ class ChessGame {
         this.botThinkingTime = 800;
         this.isLoading = true;
         this.gameMode = 'vsBot';
+        this.isBotThinking = false; // Флаг для отслеживания хода бота
         
         this.initializeBoard();
         this.bindEvents();
@@ -226,12 +229,44 @@ class ChessGame {
         modeSelect.value = this.gameMode;
         
         modeSelect.addEventListener('change', (e) => {
-            this.gameMode = e.target.value;
-            this.updateGameMode();
-            this.saveGame();
+            const newMode = e.target.value;
+            if (newMode !== this.gameMode) {
+                this.gameMode = newMode;
+                this.handleModeChange();
+                this.saveGame();
+            }
         });
         
         this.updateModeControls();
+    }
+
+    // ОБРАБОТКА СМЕНЫ РЕЖИМА
+    handleModeChange() {
+        console.log(`🔄 Смена режима с ${this.gameMode === 'vsBot' ? 'двух игроков' : 'против бота'} на ${this.gameMode === 'vsBot' ? 'против бота' : 'двух игроков'}`);
+        
+        this.updateModeControls();
+        this.clearSelection();
+        this.updateGame();
+        
+        // Если переключились в режим против бота И сейчас ход черных
+        if (this.gameMode === 'vsBot' && this.currentPlayer === 'b' && !this.chess.game_over() && !this.isBotThinking) {
+            console.log('🤖 Переключились в режим против бота, ход черных - запускаем бота');
+            setTimeout(() => {
+                this.makeBotMove();
+            }, 500);
+        }
+        
+        // Показываем уведомление о смене режима
+        const statusElement = document.getElementById('status');
+        if (statusElement) {
+            statusElement.textContent = this.gameMode === 'vsBot' ? 
+                'Режим: Против бота' : 'Режим: Два игрока';
+            statusElement.style.color = '#2196F3';
+            
+            setTimeout(() => {
+                this.updateStatus();
+            }, 2000);
+        }
     }
 
     updateModeControls() {
@@ -244,25 +279,6 @@ class ChessGame {
         }
     }
 
-    updateGameMode() {
-        this.updateModeControls();
-        this.clearSelection();
-        this.updateGame();
-        
-        const statusElement = document.getElementById('status');
-        if (statusElement) {
-            statusElement.textContent = this.gameMode === 'vsBot' ? 
-                'Режим: Против бота' : 'Режим: Два игрока';
-            statusElement.style.color = '#2196F3';
-            
-            setTimeout(() => {
-                this.updateStatus();
-            }, 2000);
-        }
-        
-        console.log(`🎮 Режим игры изменен: ${this.gameMode}`);
-    }
-
     // СОХРАНЕНИЕ ИГРЫ
     saveGame() {
         try {
@@ -273,7 +289,7 @@ class ChessGame {
                 gameMode: this.gameMode,
                 currentPlayer: this.currentPlayer,
                 timestamp: new Date().toISOString(),
-                gameVersion: "2.1.2"
+                gameVersion: "2.1.3"
             };
             
             localStorage.setItem('chessGameState', JSON.stringify(gameState));
@@ -289,7 +305,7 @@ class ChessGame {
             if (saved) {
                 const gameState = JSON.parse(saved);
                 
-                if (!gameState.gameVersion || gameState.gameVersion !== "2.1.2") {
+                if (!gameState.gameVersion || gameState.gameVersion !== "2.1.3") {
                     console.log('💾 Устаревший формат сохранения, начинаем новую игру');
                     localStorage.removeItem('chessGameState');
                     return;
@@ -306,7 +322,7 @@ class ChessGame {
                     this.gameMode = gameState.gameMode || 'vsBot';
                     this.currentPlayer = gameState.currentPlayer || 'w';
                     
-                    console.log(`💾 Игра загружена. Режим: ${this.gameMode}`);
+                    console.log(`💾 Игра загружена. Режим: ${this.gameMode}, Ход: ${this.currentPlayer === 'w' ? 'белые' : 'черные'}`);
                     
                     const modeSelect = document.getElementById('gameMode');
                     const difficultySelect = document.getElementById('difficulty');
@@ -318,12 +334,8 @@ class ChessGame {
                     this.updateModeControls();
                     this.showLoadNotification();
                     
-                    if (this.gameMode === 'vsBot' && this.currentPlayer === 'b' && !this.chess.game_over()) {
-                        console.log('🤖 Ход должен быть у бота, запускаем...');
-                        setTimeout(() => {
-                            this.makeBotMove();
-                        }, 1000);
-                    }
+                    // Проверяем, нужно ли запустить бота при загрузке
+                    this.checkAndStartBot();
                 } else {
                     console.log('💾 Сохранение устарело, начинаем новую игру');
                     localStorage.removeItem('chessGameState');
@@ -332,6 +344,16 @@ class ChessGame {
         } catch (error) {
             console.error('Ошибка при загрузке игры:', error);
             localStorage.removeItem('chessGameState');
+        }
+    }
+
+    // ПРОВЕРКА И ЗАПУСК БОТА
+    checkAndStartBot() {
+        if (this.gameMode === 'vsBot' && this.currentPlayer === 'b' && !this.chess.game_over() && !this.isBotThinking) {
+            console.log('🤖 При загрузке игры: ход черных - запускаем бота');
+            setTimeout(() => {
+                this.makeBotMove();
+            }, 1000);
         }
     }
 
@@ -512,9 +534,8 @@ class ChessGame {
             });
         }
         
-        // Обработка кликов на доске - БЕЗ preventDefault!
         document.addEventListener('click', (e) => {
-            if (this.isLoading) return;
+            if (this.isLoading || this.isBotThinking) return;
             
             if (e.target.classList.contains('square')) {
                 this.handleSquareClick(e.target.dataset.square);
@@ -523,8 +544,8 @@ class ChessGame {
     }
 
     handleSquareClick(squareName) {
-        if (this.isLoading) {
-            console.log('⚠️ Ход невозможен: идет загрузка');
+        if (this.isLoading || this.isBotThinking) {
+            console.log('⚠️ Ход невозможен: идет загрузка или ход бота');
             return;
         }
         
@@ -592,6 +613,8 @@ class ChessGame {
     }
 
     async makeMove(from, to) {
+        if (this.isBotThinking) return;
+        
         try {
             let promotion = null;
         
@@ -637,6 +660,9 @@ class ChessGame {
     }
 
     async makeBotMove() {
+        if (this.isBotThinking || this.chess.game_over()) return;
+        
+        this.isBotThinking = true;
         console.log('🤖 Бот думает...');
         this.updateStatus();
     
@@ -649,6 +675,7 @@ class ChessGame {
                 console.log('No moves available for bot');
                 this.updateGame();
                 this.saveGame();
+                this.isBotThinking = false;
                 return;
             }
             
@@ -708,6 +735,7 @@ class ChessGame {
         }
     
         this.currentPlayer = this.chess.turn();
+        this.isBotThinking = false;
         this.updateGame();
         this.saveGame();
         console.log('🤖 Ход бота завершен');
@@ -888,9 +916,16 @@ class ChessGame {
             }
         } else {
             if (this.gameMode === 'vsBot') {
-                statusElement.textContent = this.currentPlayer === 'w' ? 
-                    `Ваш ход (${difficultyNames[this.difficulty]})` : 
-                    `Ход бота (${difficultyNames[this.difficulty]})...`;
+                if (this.isBotThinking) {
+                    statusElement.textContent = `Ход бота (${difficultyNames[this.difficulty]})...`;
+                    statusElement.style.color = '#FF5722';
+                } else if (this.currentPlayer === 'w') {
+                    statusElement.textContent = `Ваш ход (${difficultyNames[this.difficulty]})`;
+                    statusElement.style.color = '#4CAF50';
+                } else {
+                    statusElement.textContent = `Ход бота (${difficultyNames[this.difficulty]})...`;
+                    statusElement.style.color = '#FF5722';
+                }
             } else {
                 const currentColor = this.currentPlayer === 'w' ? 'белые' : 'черные';
                 
@@ -914,6 +949,7 @@ class ChessGame {
         
         turnElement.textContent = `Ход: ${this.currentPlayer === 'w' ? 'белые' : 'черные'}`;
         
+        // Сбрасываем стили для режима против бота
         if (this.gameMode === 'vsBot') {
             statusElement.style.background = '';
             statusElement.style.padding = '';
@@ -921,12 +957,6 @@ class ChessGame {
             statusElement.style.display = '';
             statusElement.style.fontWeight = '';
             statusElement.style.textShadow = '';
-            
-            if (this.currentPlayer === 'w') {
-                statusElement.style.color = '#4CAF50';
-            } else {
-                statusElement.style.color = '#FF5722';
-            }
         }
     }
 
@@ -934,7 +964,6 @@ class ChessGame {
         const movesList = document.getElementById('movesList');
         if (!movesList) return;
         
-        // Просто обновляем содержимое, без прокрутки
         movesList.innerHTML = '';
         
         for (let i = 0; i < this.movesHistory.length; i += 2) {
@@ -986,18 +1015,4 @@ class ChessGame {
 document.addEventListener('DOMContentLoaded', function() {
     console.log('DOM loaded, starting chess game...');
     new ChessGame();
-    
-    // Только одно решение для прокрутки: фиксируем позицию при загрузке
-    window.addEventListener('load', function() {
-        // Фиксируем скролл вверху страницы
-        window.scrollTo(0, 0);
-        
-        // Предотвращаем скролл на истории ходов
-        const movesList = document.getElementById('movesList');
-        if (movesList) {
-            movesList.addEventListener('scroll', function(e) {
-                // Ничего не делаем, позволяем естественную прокрутку
-            });
-        }
-    });
 });
