@@ -1,5 +1,5 @@
 // == ШАХМАТЫ В TELEGRAM ==
-// Версия: 1.2.0
+// Версия: 1.2.1
 // Автор: ChessBot
 // Дата: 2024
 // История версий:
@@ -7,19 +7,21 @@
 // 1.1.0 - Исправлено зависание бота при превращении пешек
 // 1.1.1 - Добавлена система версий и защита от кеширования
 // 1.2.0 - Добавлено автосохранение игры
+// 1.2.1 - Исправлено зависание при загрузке сохраненной игры
 
 // Telegram Web App Integration
 class TelegramIntegration {
     constructor() {
         this.isTelegram = false;
-        this.version = "1.2.0";
+        this.version = "1.2.1";
         this.versionHistory = {
             "1.0.0": "Базовая версия игры",
             "1.1.0": "Исправлено зависание бота при превращении пешек", 
             "1.1.1": "Добавлена система версий и защита от кеширования",
-            "1.2.0": "Добавлено автосохранение игры"
+            "1.2.0": "Добавлено автосохранение игры",
+            "1.2.1": "Исправлено зависание при загрузке сохраненной игры"
         };
-        this.buildDate = "2024-01-15";
+        this.buildDate = new Date().toISOString().split('T')[0];
         this.init();
     }
 
@@ -174,6 +176,7 @@ class ChessGame {
         this.movesHistory = [];
         this.difficulty = 'medium';
         this.botThinkingTime = 800;
+        this.isLoading = true; // Флаг загрузки
         
         this.initializeBoard();
         this.bindEvents();
@@ -182,21 +185,31 @@ class ChessGame {
         this.updateGame();
         
         window.chessGame = this;
+        
+        // Снимаем флаг загрузки после небольшой задержки
+        setTimeout(() => {
+            this.isLoading = false;
+            console.log('✅ Игра полностью загружена');
+        }, 500);
     }
 
     // СОХРАНЕНИЕ ИГРЫ
     saveGame() {
         try {
+            // Определяем, чей сейчас должен быть ход по цвету фигур
+            const turnColor = this.chess.turn(); // 'w' или 'b'
+            
             const gameState = {
                 fen: this.chess.fen(),
                 movesHistory: this.movesHistory,
                 difficulty: this.difficulty,
-                isPlayerTurn: this.isPlayerTurn,
-                timestamp: new Date().toISOString()
+                turnColor: turnColor, // Сохраняем цвет, чей сейчас ход
+                timestamp: new Date().toISOString(),
+                gameVersion: "1.2.1" // Версия формата сохранения
             };
             
             localStorage.setItem('chessGameState', JSON.stringify(gameState));
-            console.log('💾 Игра сохранена');
+            console.log('💾 Игра сохранена. Очередь:', turnColor === 'w' ? 'белые' : 'черные');
         } catch (error) {
             console.error('Ошибка при сохранении игры:', error);
         }
@@ -209,24 +222,46 @@ class ChessGame {
             if (saved) {
                 const gameState = JSON.parse(saved);
                 
+                // Проверяем версию сохранения
+                if (!gameState.gameVersion || gameState.gameVersion !== "1.2.1") {
+                    console.log('💾 Устаревший формат сохранения, начинаем новую игру');
+                    localStorage.removeItem('chessGameState');
+                    return;
+                }
+                
                 const savedTime = new Date(gameState.timestamp);
                 const currentTime = new Date();
                 const hoursDiff = (currentTime - savedTime) / (1000 * 60 * 60);
                 
                 if (hoursDiff < 24) {
+                    // Загружаем позицию
                     this.chess.load(gameState.fen);
                     this.movesHistory = gameState.movesHistory || [];
                     this.difficulty = gameState.difficulty || 'medium';
-                    this.isPlayerTurn = gameState.isPlayerTurn !== undefined ? gameState.isPlayerTurn : true;
                     
+                    // ВАЖНО: Определяем, должен ли ход быть у игрока или бота
+                    // Игрок играет белыми (color === 'w')
+                    const currentTurn = gameState.turnColor || 'w';
+                    this.isPlayerTurn = (currentTurn === 'w'); // Если ход белых - ход игрока
+                    
+                    console.log(`💾 Игра загружена. Очередь: ${currentTurn === 'w' ? 'белые (игрок)' : 'черные (бот)'}`);
+                    
+                    // Обновляем селектор сложности
                     const difficultySelect = document.getElementById('difficulty');
                     if (difficultySelect) {
                         difficultySelect.value = this.difficulty;
                     }
                     
                     this.updateThinkingTime();
-                    console.log('💾 Игра загружена');
                     this.showLoadNotification();
+                    
+                    // Если ход должен быть у бота, запускаем его ход
+                    if (!this.isPlayerTurn && !this.chess.game_over()) {
+                        console.log('🤖 Ход должен быть у бота, запускаем...');
+                        setTimeout(() => {
+                            this.makeBotMove();
+                        }, 1000);
+                    }
                 } else {
                     console.log('💾 Сохранение устарело, начинаем новую игру');
                     localStorage.removeItem('chessGameState');
@@ -398,6 +433,9 @@ class ChessGame {
         document.getElementById('surrender').addEventListener('click', () => this.surrender());
         
         document.addEventListener('click', (e) => {
+            // Запрещаем клики во время загрузки или хода бота
+            if (this.isLoading || !this.isPlayerTurn) return;
+            
             if (e.target.classList.contains('square')) {
                 this.handleSquareClick(e.target.dataset.square);
             }
@@ -405,7 +443,10 @@ class ChessGame {
     }
 
     handleSquareClick(squareName) {
-        if (!this.isPlayerTurn) return;
+        if (!this.isPlayerTurn || this.isLoading) {
+            console.log('⚠️ Ход невозможен: идет загрузка или ход бота');
+            return;
+        }
         
         const piece = this.chess.get(squareName);
         
@@ -451,6 +492,8 @@ class ChessGame {
     }
 
     async makeMove(from, to) {
+        if (!this.isPlayerTurn) return;
+        
         try {
             let promotion = null;
         
@@ -492,6 +535,7 @@ class ChessGame {
     }
 
     async makeBotMove() {
+        console.log('🤖 Бот думает...');
         this.updateStatus();
     
         try {
@@ -503,6 +547,7 @@ class ChessGame {
                 console.log('No moves available for bot');
                 this.isPlayerTurn = true;
                 this.updateGame();
+                this.saveGame();
                 return;
             }
             
@@ -562,6 +607,8 @@ class ChessGame {
     
         this.isPlayerTurn = true;
         this.updateGame();
+        this.saveGame();
+        console.log('🤖 Ход бота завершен');
     }
 
     handlePromotionMoves(promotionMoves) {
