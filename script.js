@@ -1,5 +1,5 @@
 // == ШАХМАТЫ В TELEGRAM ==
-// Версия: 2.0.0
+// Версия: 2.1.0
 // Автор: ChessBot
 // Дата: 2024
 // История версий:
@@ -9,19 +9,21 @@
 // 1.2.0 - Добавлено автосохранение игры
 // 1.2.1 - Исправлено зависание при загрузке сохраненной игры
 // 2.0.0 - Добавлен режим игры для двух игроков
+// 2.1.0 - Улучшен режим двух игроков: автоматическое определение чей ход
 
 // Telegram Web App Integration
 class TelegramIntegration {
     constructor() {
         this.isTelegram = false;
-        this.version = "2.0.0";
+        this.version = "2.1.0";
         this.versionHistory = {
             "1.0.0": "Базовая версия игры",
             "1.1.0": "Исправлено зависание бота при превращении пешек", 
             "1.1.1": "Добавлена система версий и защита от кеширования",
             "1.2.0": "Добавлено автосохранение игры",
             "1.2.1": "Исправлено зависание при загрузке сохраненной игры",
-            "2.0.0": "Добавлен режим игры для двух игроков"
+            "2.0.0": "Добавлен режим игры для двух игроков",
+            "2.1.0": "Улучшен режим двух игроков: автоматическое определение чей ход"
         };
         this.buildDate = new Date().toISOString().split('T')[0];
         this.init();
@@ -149,7 +151,7 @@ class TelegramIntegration {
         if (!lastSeenVersion || lastSeenVersion !== this.version) {
             setTimeout(() => {
                 console.log(`%c🆕 Загружена новая версия! v${this.version}`, 'color: #FF9800; font-weight: bold;');
-                alert(`🎉 Новая версия шахмат v${this.version}!\n\nДобавлен режим игры для двух игроков!`);
+                alert(`🎉 Новая версия шахмат v${this.version}!\n\nУлучшен режим двух игроков!`);
             }, 1000);
             
             localStorage.setItem('lastSeenVersion', this.version);
@@ -181,7 +183,8 @@ class ChessGame {
         this.botThinkingTime = 800;
         this.isLoading = true;
         this.gameMode = 'vsBot'; // 'vsBot' или 'twoPlayers'
-        this.playerColor = 'w'; // Цвет текущего игрока в двухпользовательском режиме
+        this.activePlayer = 'w'; // Кто сейчас должен ходить в режиме двух игроков
+        this.playerTurn = 'w'; // Чья очередь ходить (определяется автоматически)
         
         this.initializeBoard();
         this.bindEvents();
@@ -212,11 +215,8 @@ class ChessGame {
             <label style="margin-right: 10px;">Режим:</label>
             <select id="gameMode" style="padding: 5px; border-radius: 5px; border: 1px solid #ccc;">
                 <option value="vsBot">🤖 Против бота</option>
-                <option value="twoPlayers">👥 Два игрока</option>
+                <option value="twoPlayers">👥 Два игрока (на одном устройстве)</option>
             </select>
-            <button id="changeColor" style="margin-left: 10px; padding: 5px 10px; border-radius: 5px; border: 1px solid #ccc; background: #f0f0f0;">
-                Передать устройство
-            </button>
         `;
         
         controls.parentNode.insertBefore(modeDiv, controls);
@@ -230,54 +230,21 @@ class ChessGame {
             this.saveGame();
         });
         
-        document.getElementById('changeColor').addEventListener('click', () => {
-            this.changePlayerColor();
-        });
-        
-        // Скрываем кнопку "Передать устройство" в режиме против бота
         this.updateModeControls();
     }
 
     updateModeControls() {
-        const changeColorBtn = document.getElementById('changeColor');
         const difficultySelector = document.querySelector('.difficulty-selector');
         
         if (this.gameMode === 'vsBot') {
-            if (changeColorBtn) changeColorBtn.style.display = 'none';
             if (difficultySelector) difficultySelector.style.display = 'block';
         } else {
-            if (changeColorBtn) changeColorBtn.style.display = 'inline-block';
             if (difficultySelector) difficultySelector.style.display = 'none';
-        }
-    }
-
-    changePlayerColor() {
-        if (this.gameMode === 'twoPlayers') {
-            this.playerColor = this.playerColor === 'w' ? 'b' : 'w';
-            this.updateGame();
-            this.saveGame();
-            
-            // Показываем уведомление
-            const statusElement = document.getElementById('status');
-            if (statusElement) {
-                statusElement.textContent = this.playerColor === 'w' ? 
-                    'Теперь ходят белые!' : 'Теперь ходят черные!';
-                statusElement.style.color = '#2196F3';
-                
-                setTimeout(() => {
-                    this.updateStatus();
-                }, 2000);
-            }
         }
     }
 
     updateGameMode() {
         this.updateModeControls();
-        
-        if (this.gameMode === 'twoPlayers') {
-            this.playerColor = this.currentPlayer;
-        }
-        
         this.clearSelection();
         this.updateGame();
         
@@ -292,6 +259,8 @@ class ChessGame {
                 this.updateStatus();
             }, 2000);
         }
+        
+        console.log(`🎮 Режим игры изменен: ${this.gameMode}`);
     }
 
     // СОХРАНЕНИЕ ИГРЫ
@@ -303,9 +272,10 @@ class ChessGame {
                 difficulty: this.difficulty,
                 gameMode: this.gameMode,
                 currentPlayer: this.currentPlayer,
-                playerColor: this.playerColor,
+                activePlayer: this.activePlayer,
+                playerTurn: this.playerTurn,
                 timestamp: new Date().toISOString(),
-                gameVersion: "2.0.0"
+                gameVersion: "2.1.0"
             };
             
             localStorage.setItem('chessGameState', JSON.stringify(gameState));
@@ -323,7 +293,7 @@ class ChessGame {
                 const gameState = JSON.parse(saved);
                 
                 // Проверяем версию сохранения
-                if (!gameState.gameVersion || gameState.gameVersion !== "2.0.0") {
+                if (!gameState.gameVersion || gameState.gameVersion !== "2.1.0") {
                     console.log('💾 Устаревший формат сохранения, начинаем новую игру');
                     localStorage.removeItem('chessGameState');
                     return;
@@ -340,7 +310,8 @@ class ChessGame {
                     this.difficulty = gameState.difficulty || 'medium';
                     this.gameMode = gameState.gameMode || 'vsBot';
                     this.currentPlayer = gameState.currentPlayer || 'w';
-                    this.playerColor = gameState.playerColor || 'w';
+                    this.activePlayer = gameState.activePlayer || 'w';
+                    this.playerTurn = gameState.playerTurn || 'w';
                     
                     console.log(`💾 Игра загружена. Режим: ${this.gameMode}`);
                     
@@ -548,10 +519,12 @@ class ChessGame {
         }
         
         const piece = this.chess.get(squareName);
+        const currentTurn = this.chess.turn();
         
-        // В режиме двух игроков: проверяем цвет фигуры текущего игрока
+        // В режиме двух игроков: любой игрок может ходить своей фигурой
         if (this.gameMode === 'twoPlayers') {
-            if (piece && piece.color === this.playerColor) {
+            // Проверяем, что игрок пытается ходить фигурой своего цвета
+            if (piece && piece.color === currentTurn) {
                 this.selectedSquare = squareName;
                 this.legalMoves = this.chess.moves({ square: squareName, verbose: true });
                 this.highlightLegalMoves();
@@ -565,7 +538,7 @@ class ChessGame {
         }
         // В режиме против бота: игрок всегда играет белыми
         else if (this.gameMode === 'vsBot') {
-            if (piece && piece.color === 'w') {
+            if (piece && piece.color === 'w' && currentTurn === 'w') {
                 this.selectedSquare = squareName;
                 this.legalMoves = this.chess.moves({ square: squareName, verbose: true });
                 this.highlightLegalMoves();
@@ -645,11 +618,9 @@ class ChessGame {
                         setTimeout(() => {
                             this.makeBotMove();
                         }, 300);
-                    } else if (this.gameMode === 'twoPlayers') {
-                        // В двухпользовательском режиме просто обновляем игру
-                        // Игрок должен нажать "Передать устройство" для смены стороны
-                        this.updateGame();
                     }
+                    // В режиме двух игроков просто обновляем игру
+                    // Следующий игрок увидит, что ход перешел к нему
                 }
             } else {
                 console.error('Invalid move attempted:', from, to);
@@ -890,6 +861,7 @@ class ChessGame {
     updateGame() {
         this.updatePieces();
         this.updateStatus();
+        this.updateBoardAccess();
     }
 
     updateStatus() {
@@ -900,16 +872,16 @@ class ChessGame {
         
         const difficultyNames = {
             'easy': '🤖 Легкий',
-            'medium': '🎯 Средний', 
+            'medium': '🎯 Средный', 
             'hard': '🔥 Сложный'
         };
         
         if (this.chess.game_over()) {
             if (this.chess.in_checkmate()) {
                 const winner = this.currentPlayer === 'w' ? 'черные' : 'белые';
-                statusElement.textContent = `Мат! ${winner} выиграли.`;
+                statusElement.textContent = `🎉 Мат! ${winner} выиграли!`;
             } else {
-                statusElement.textContent = 'Ничья!';
+                statusElement.textContent = '🤝 Ничья!';
             }
         } else {
             if (this.gameMode === 'vsBot') {
@@ -917,31 +889,62 @@ class ChessGame {
                     `Ваш ход (${difficultyNames[this.difficulty]})` : 
                     `Ход бота (${difficultyNames[this.difficulty]})...`;
             } else {
-                // В режиме двух игроков
-                const playerColorName = this.playerColor === 'w' ? 'белые' : 'черные';
-                const currentTurnName = this.currentPlayer === 'w' ? 'белые' : 'черные';
+                // В режиме двух игроков - понятное сообщение
+                const currentColor = this.currentPlayer === 'w' ? 'белые' : 'черные';
+                statusElement.textContent = `Ходят ${currentColor}`;
                 
-                if (this.playerColor === this.currentPlayer) {
-                    statusElement.textContent = `Ваш ход (играете за ${playerColorName})`;
+                // Добавляем эмодзи для наглядности
+                if (this.currentPlayer === 'w') {
+                    statusElement.innerHTML = `⚪ Ходят белые`;
                 } else {
-                    statusElement.textContent = `Ход противника (ходят ${currentTurnName})`;
+                    statusElement.innerHTML = `⚫ Ходят черные`;
                 }
             }
         }
         
         turnElement.textContent = `Ход: ${this.currentPlayer === 'w' ? 'белые' : 'черные'}`;
         
-        // Подсвечиваем текущего игрока
+        // Подсвечиваем статус для режима двух игроков
         if (statusElement) {
-            if (this.gameMode === 'twoPlayers' && this.playerColor === this.currentPlayer) {
-                statusElement.style.color = '#4CAF50';
+            if (this.gameMode === 'twoPlayers') {
+                statusElement.style.color = this.currentPlayer === 'w' ? '#FFFFFF' : '#000000';
+                statusElement.style.background = this.currentPlayer === 'w' ? '#333333' : '#DDDDDD';
+                statusElement.style.padding = '5px 10px';
+                statusElement.style.borderRadius = '10px';
+                statusElement.style.display = 'inline-block';
                 statusElement.style.fontWeight = 'bold';
-            } else if (this.gameMode === 'vsBot' && this.currentPlayer === 'w') {
-                statusElement.style.color = '#4CAF50';
-                statusElement.style.fontWeight = 'bold';
+                statusElement.style.textShadow = 'none';
             } else {
-                statusElement.style.color = '';
+                statusElement.style.background = '';
+                statusElement.style.padding = '';
+                statusElement.style.borderRadius = '';
+                statusElement.style.display = '';
                 statusElement.style.fontWeight = '';
+                statusElement.style.textShadow = '';
+                
+                if (this.currentPlayer === 'w') {
+                    statusElement.style.color = '#4CAF50';
+                } else {
+                    statusElement.style.color = '#FF5722';
+                }
+            }
+        }
+    }
+
+    updateBoardAccess() {
+        // В режиме двух игроков: показываем подсказку о том, кто может ходить
+        if (this.gameMode === 'twoPlayers') {
+            const statusElement = document.getElementById('status');
+            if (statusElement) {
+                // Добавляем индикатор доступности
+                const canMove = !this.chess.game_over();
+                if (canMove) {
+                    statusElement.style.opacity = '1';
+                    statusElement.style.border = '2px solid #4CAF50';
+                } else {
+                    statusElement.style.opacity = '0.7';
+                    statusElement.style.border = '';
+                }
             }
         }
     }
@@ -962,6 +965,11 @@ class ChessGame {
             moveElement.textContent = `${moveNumber}. ${whiteMove} ${blackMove}`;
             movesList.appendChild(moveElement);
         }
+        
+        // Прокручиваем к последнему ходу
+        if (movesList.lastChild) {
+            movesList.lastChild.scrollIntoView({ behavior: 'smooth' });
+        }
     }
 
     newGame() {
@@ -970,7 +978,6 @@ class ChessGame {
             this.selectedSquare = null;
             this.legalMoves = [];
             this.currentPlayer = 'w';
-            this.playerColor = 'w';
             this.movesHistory = [];
             this.clearHighlights();
             this.updateGame();
@@ -979,7 +986,7 @@ class ChessGame {
             
             const statusElement = document.getElementById('status');
             if (statusElement) {
-                statusElement.textContent = 'Новая игра началась!';
+                statusElement.textContent = '🎮 Новая игра началась!';
                 setTimeout(() => this.updateStatus(), 2000);
             }
         }
@@ -992,7 +999,7 @@ class ChessGame {
     surrender() {
         if (confirm('Сдаться?')) {
             this.newGame();
-            document.getElementById('status').textContent = 'Вы сдались!';
+            document.getElementById('status').textContent = '🏳️ Вы сдались!';
             this.saveGame();
         }
     }
