@@ -1,5 +1,5 @@
 // == ШАХМАТЫ В TELEGRAM ==
-// Версия: 2.1.1
+// Версия: 2.1.2
 // Автор: ChessBot
 // Дата: 2024
 // История версий:
@@ -11,12 +11,13 @@
 // 2.0.0 - Добавлен режим игры для двух игроков
 // 2.1.0 - Улучшен режим двух игроков: автоматическое определение чей ход
 // 2.1.1 - Исправлена прокрутка страницы после хода
+// 2.1.2 - Исправлена блокировка ходов фигур
 
 // Telegram Web App Integration
 class TelegramIntegration {
     constructor() {
         this.isTelegram = false;
-        this.version = "2.1.1";
+        this.version = "2.1.2";
         this.versionHistory = {
             "1.0.0": "Базовая версия игры",
             "1.1.0": "Исправлено зависание бота при превращении пешек", 
@@ -25,7 +26,8 @@ class TelegramIntegration {
             "1.2.1": "Исправлено зависание при загрузке сохраненной игры",
             "2.0.0": "Добавлен режим игры для двух игроков",
             "2.1.0": "Улучшен режим двух игроков: автоматическое определение чей ход",
-            "2.1.1": "Исправлена прокрутка страницы после хода"
+            "2.1.1": "Исправлена прокрутка страницы после хода",
+            "2.1.2": "Исправлена блокировка ходов фигур"
         };
         this.buildDate = new Date().toISOString().split('T')[0];
         this.init();
@@ -198,29 +200,6 @@ class ChessGame {
             this.isLoading = false;
             console.log('✅ Игра полностью загружена');
         }, 500);
-        
-        // Предотвращаем прокрутку при кликах
-        this.preventScrollOnClicks();
-    }
-
-    preventScrollOnClicks() {
-        // Предотвращаем прокрутку при кликах на доску
-        document.addEventListener('click', (e) => {
-            if (e.target.classList.contains('square')) {
-                e.preventDefault();
-                e.stopPropagation();
-                return false;
-            }
-        }, true);
-        
-        // Предотвращаем прокрутку при кликах на кнопки
-        document.addEventListener('click', (e) => {
-            if (e.target.tagName === 'BUTTON' || e.target.tagName === 'SELECT') {
-                e.preventDefault();
-                e.stopPropagation();
-                return false;
-            }
-        }, true);
     }
 
     // СОЗДАЕМ ВЫБОР РЕЖИМА ИГРЫ
@@ -247,7 +226,6 @@ class ChessGame {
         modeSelect.value = this.gameMode;
         
         modeSelect.addEventListener('change', (e) => {
-            e.preventDefault();
             this.gameMode = e.target.value;
             this.updateGameMode();
             this.saveGame();
@@ -295,7 +273,7 @@ class ChessGame {
                 gameMode: this.gameMode,
                 currentPlayer: this.currentPlayer,
                 timestamp: new Date().toISOString(),
-                gameVersion: "2.1.1"
+                gameVersion: "2.1.2"
             };
             
             localStorage.setItem('chessGameState', JSON.stringify(gameState));
@@ -311,7 +289,7 @@ class ChessGame {
             if (saved) {
                 const gameState = JSON.parse(saved);
                 
-                if (!gameState.gameVersion || gameState.gameVersion !== "2.1.1") {
+                if (!gameState.gameVersion || gameState.gameVersion !== "2.1.2") {
                     console.log('💾 Устаревший формат сохранения, начинаем новую игру');
                     localStorage.removeItem('chessGameState');
                     return;
@@ -397,7 +375,6 @@ class ChessGame {
         difficultySelect.value = this.difficulty;
         
         difficultySelect.addEventListener('change', (e) => {
-            e.preventDefault();
             this.difficulty = e.target.value;
             this.updateThinkingTime();
             this.saveGame();
@@ -518,31 +495,28 @@ class ChessGame {
         const surrenderBtn = document.getElementById('surrender');
         
         if (newGameBtn) {
-            newGameBtn.addEventListener('click', (e) => {
-                e.preventDefault();
+            newGameBtn.addEventListener('click', () => {
                 this.newGame();
             });
         }
         
         if (flipBoardBtn) {
-            flipBoardBtn.addEventListener('click', (e) => {
-                e.preventDefault();
+            flipBoardBtn.addEventListener('click', () => {
                 this.flipBoard();
             });
         }
         
         if (surrenderBtn) {
-            surrenderBtn.addEventListener('click', (e) => {
-                e.preventDefault();
+            surrenderBtn.addEventListener('click', () => {
                 this.surrender();
             });
         }
         
+        // Обработка кликов на доске - БЕЗ preventDefault!
         document.addEventListener('click', (e) => {
             if (this.isLoading) return;
             
             if (e.target.classList.contains('square')) {
-                e.preventDefault();
                 this.handleSquareClick(e.target.dataset.square);
             }
         });
@@ -639,7 +613,7 @@ class ChessGame {
         
             if (move) {
                 this.movesHistory.push(move.san);
-                this.updateMovesList(false); // false = не прокручиваем
+                this.updateMovesList();
                 this.clearSelection();
                 this.currentPlayer = this.chess.turn();
                 this.updateGame();
@@ -709,7 +683,7 @@ class ChessGame {
                 const moveResult = this.chess.move(selectedMove);
                 if (moveResult) {
                     this.movesHistory.push(moveResult.san);
-                    this.updateMovesList(false); // false = не прокручиваем
+                    this.updateMovesList();
                     this.currentPlayer = this.chess.turn();
                     this.saveGame();
                 } else {
@@ -940,7 +914,6 @@ class ChessGame {
         
         turnElement.textContent = `Ход: ${this.currentPlayer === 'w' ? 'белые' : 'черные'}`;
         
-        // Убираем подсветку для режима против бота
         if (this.gameMode === 'vsBot') {
             statusElement.style.background = '';
             statusElement.style.padding = '';
@@ -957,13 +930,11 @@ class ChessGame {
         }
     }
 
-    updateMovesList(scrollToBottom = false) {
+    updateMovesList() {
         const movesList = document.getElementById('movesList');
         if (!movesList) return;
         
-        // Запоминаем текущую позицию прокрутки
-        const wasScrolledToBottom = movesList.scrollHeight - movesList.scrollTop === movesList.clientHeight;
-        
+        // Просто обновляем содержимое, без прокрутки
         movesList.innerHTML = '';
         
         for (let i = 0; i < this.movesHistory.length; i += 2) {
@@ -975,13 +946,6 @@ class ChessGame {
             moveElement.className = 'move-number';
             moveElement.textContent = `${moveNumber}. ${whiteMove} ${blackMove}`;
             movesList.appendChild(moveElement);
-        }
-        
-        // Прокручиваем только если пользователь уже был внизу ИЛИ явно запрошено
-        if (scrollToBottom || wasScrolledToBottom) {
-            setTimeout(() => {
-                movesList.scrollTop = movesList.scrollHeight;
-            }, 0);
         }
     }
 
@@ -1023,20 +987,17 @@ document.addEventListener('DOMContentLoaded', function() {
     console.log('DOM loaded, starting chess game...');
     new ChessGame();
     
-    // Дополнительная защита от прокрутки
-    document.body.addEventListener('touchmove', function(e) {
-        if (e.target.classList.contains('square') || 
-            e.target.tagName === 'BUTTON' || 
-            e.target.tagName === 'SELECT') {
-            e.preventDefault();
+    // Только одно решение для прокрутки: фиксируем позицию при загрузке
+    window.addEventListener('load', function() {
+        // Фиксируем скролл вверху страницы
+        window.scrollTo(0, 0);
+        
+        // Предотвращаем скролл на истории ходов
+        const movesList = document.getElementById('movesList');
+        if (movesList) {
+            movesList.addEventListener('scroll', function(e) {
+                // Ничего не делаем, позволяем естественную прокрутку
+            });
         }
-    }, { passive: false });
-    
-    document.body.addEventListener('wheel', function(e) {
-        if (e.target.classList.contains('square') || 
-            e.target.tagName === 'BUTTON' || 
-            e.target.tagName === 'SELECT') {
-            e.preventDefault();
-        }
-    }, { passive: false });
+    });
 });
