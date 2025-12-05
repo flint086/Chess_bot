@@ -1,5 +1,5 @@
 // == ШАХМАТЫ В TELEGRAM ==
-// Версия: 2.3.0
+// Версия: 2.3.1
 // Автор: ChessBot
 // Дата: 2024
 // История версий:
@@ -16,12 +16,13 @@
 // 2.2.0 - Добавлен новый уровень сложности "Эксперт"
 // 2.2.1 - Исправлено отображение доски и выбор сложности
 // 2.3.0 - Улучшен экспертный уровень: мини-макс алгоритм на 3 хода вперед
+// 2.3.1 - Исправлено странное поведение экспертного уровня, улучшена оценка позиций
 
 // Telegram Web App Integration
 class TelegramIntegration {
     constructor() {
         this.isTelegram = false;
-        this.version = "2.3.0";
+        this.version = "2.3.1";
         this.versionHistory = {
             "1.0.0": "Базовая версия игры",
             "1.1.0": "Исправлено зависание бота при превращении пешек", 
@@ -35,7 +36,8 @@ class TelegramIntegration {
             "2.1.3": "Исправлен переход между режимами игры",
             "2.2.0": "Добавлен новый уровень сложности 'Эксперт'",
             "2.2.1": "Исправлено отображение доски и выбор сложности",
-            "2.3.0": "Улучшен экспертный уровень: мини-макс алгоритм на 3 хода вперед"
+            "2.3.0": "Улучшен экспертный уровень: мини-макс алгоритм на 3 хода вперед",
+            "2.3.1": "Исправлено странное поведение экспертного уровня, улучшена оценка позиций"
         };
         this.buildDate = new Date().toISOString().split('T')[0];
         this.init();
@@ -163,7 +165,7 @@ class TelegramIntegration {
         if (!lastSeenVersion || lastSeenVersion !== this.version) {
             setTimeout(() => {
                 console.log(`%c🆕 Загружена новая версия! v${this.version}`, 'color: #FF9800; font-weight: bold;');
-                alert(`🎉 Новая версия шахмат v${this.version}!\n\nЭкспертный уровень теперь использует мини-макс алгоритм! 🧠⚡`);
+                alert(`🎉 Новая версия шахмат v${this.version}!\n\nЭкспертный уровень теперь работает корректно! 🧠⚡`);
             }, 1000);
             
             localStorage.setItem('lastSeenVersion', this.version);
@@ -196,6 +198,8 @@ class ChessGame {
         this.isLoading = true;
         this.gameMode = 'vsBot';
         this.isBotThinking = false;
+        this.lastBotMove = null;
+        this.moveOscillationCounter = {};
         
         this.initializeBoard();
         this.bindEvents();
@@ -546,7 +550,7 @@ class ChessGame {
                 this.botThinkingTime = 1200;
                 break;
             case 'expert':
-                this.botThinkingTime = 2500; // 2.5 секунды для мини-макса
+                this.botThinkingTime = 3500; // 3.5 секунды для мини-макса
                 break;
         }
         this.saveGame();
@@ -580,10 +584,21 @@ class ChessGame {
                 selectedMove = this.getBestMove(moves);
             }
             
+            // Проверка на осмысленность хода
+            if (selectedMove && this.isMeaninglessMove(selectedMove, moves)) {
+                console.log('⚠️ Предотвращен бессмысленный ход, выбираю альтернативу');
+                selectedMove = this.getAlternativeMove(moves, selectedMove);
+            }
+            
             if (selectedMove) {
                 const moveResult = this.chess.move(selectedMove);
                 if (moveResult) {
                     this.movesHistory.push(moveResult.san);
+                    this.lastBotMove = {
+                        from: selectedMove.from,
+                        to: selectedMove.to,
+                        san: moveResult.san
+                    };
                     this.updateMovesList();
                     this.currentPlayer = this.chess.turn();
                     this.saveGame();
@@ -726,17 +741,21 @@ class ChessGame {
     getExpertMinimaxMove(moves) {
         console.log('🧠 Эксперт использует мини-макс алгоритм (глубина 3)...');
         
-        // Если мало ходов или конец игры - простой выбор
+        // Если мало ходов - простой выбор
         if (moves.length <= 3 || this.chess.game_over()) {
-            return this.createMoveObject(this.getHardMove(moves));
+            const hardMove = this.getHardMove(moves);
+            return this.createMoveObject(hardMove);
         }
         
         let bestMove = null;
         let bestScore = -Infinity;
         let evaluatedMoves = 0;
         
+        // Сортируем ходы для лучшего поиска (лучшие ходы сначала)
+        const sortedMoves = this.sortMovesForMinimax(moves);
+        
         // Оцениваем каждый возможный ход
-        for (const move of moves) {
+        for (const move of sortedMoves) {
             const moveObj = this.createMoveObject(move);
             
             // Делаем ход на временной доске
@@ -744,7 +763,8 @@ class ChessGame {
             const result = tempChess.move(moveObj);
             
             if (result) {
-                // Оцениваем позицию после этого хода (мини-макс с глубиной 3)
+                // Оцениваем позицию после этого хода
+                // Глубина 3: наш ход -> ответ противника -> наш ответ
                 const score = this.minimax(tempChess, 2, false, -Infinity, Infinity);
                 
                 console.log(`🧠 Ход ${move.san}: оценка ${score.toFixed(2)}`);
@@ -756,8 +776,8 @@ class ChessGame {
                 
                 evaluatedMoves++;
                 
-                // Ограничиваем количество оцениваемых ходов для скорости
-                if (evaluatedMoves >= 15 && moves.length > 20) {
+                // Ограничиваем количество оцениваемых ходов, но более разумно
+                if (evaluatedMoves >= 20 && moves.length > 25) {
                     console.log(`🧠 Оценил ${evaluatedMoves} из ${moves.length} ходов`);
                     break;
                 }
@@ -769,9 +789,55 @@ class ChessGame {
             return this.createMoveObject(bestMove);
         }
         
-        // Если мини-макс не сработал, используем старый алгоритм
+        // Фолбэк
         console.log('🧠 Мини-макс не дал результата, использую старый алгоритм');
         return this.createMoveObject(this.getHardMove(moves));
+    }
+
+    // Улучшенная сортировка ходов для минимакса
+    sortMovesForMinimax(moves) {
+        return moves.sort((a, b) => {
+            // Приоритет: мат, шах, взятия, хорошие ходы
+            const scoreA = this.getMovePriority(a);
+            const scoreB = this.getMovePriority(b);
+            return scoreB - scoreA;
+        });
+    }
+
+    getMovePriority(move) {
+        let priority = 0;
+        
+        // Мат - максимальный приоритет
+        if (move.san.includes('#')) return 1000;
+        
+        // Шах
+        if (move.san.includes('+')) priority += 100;
+        
+        // Взятие
+        if (move.san.includes('x')) {
+            const captured = this.chess.get(move.to);
+            if (captured) {
+                priority += this.getPieceValue(captured.type) * 10;
+            }
+        }
+        
+        // Рокировка
+        if (move.san === 'O-O' || move.san === 'O-O-O') priority += 50;
+        
+        // Развитие фигур в начале
+        if (this.chess.moveNumber() < 10) {
+            const piece = this.chess.get(move.from);
+            if (piece && (piece.type === 'n' || piece.type === 'b')) {
+                priority += 20;
+            }
+        }
+        
+        // Предотвращение осцилляций
+        if (this.lastBotMove && move.from === this.lastBotMove.to && move.to === this.lastBotMove.from) {
+            priority -= 200; // Сильный штраф за ход туда-обратно
+        }
+        
+        return priority;
     }
 
     // Мини-макс алгоритм с альфа-бета отсечением
@@ -786,11 +852,23 @@ class ChessGame {
             const moves = board.moves({ verbose: true });
             
             // Сортируем ходы для лучшей работы альфа-бета отсечения
-            const sortedMoves = this.sortMoves(board, moves, true);
+            const sortedMoves = this.sortMovesForMinimaxSearch(board, moves, true);
             
             for (const move of sortedMoves) {
                 const tempBoard = new Chess(board.fen());
-                tempBoard.move({ from: move.from, to: move.to, promotion: move.promotion });
+                const moveObj = { from: move.from, to: move.to };
+                
+                // Обработка превращения пешки
+                const piece = tempBoard.get(move.from);
+                if (piece && piece.type === 'p') {
+                    const targetRank = move.to[1];
+                    if ((piece.color === 'b' && targetRank === '1') || 
+                        (piece.color === 'w' && targetRank === '8')) {
+                        moveObj.promotion = 'q';
+                    }
+                }
+                
+                tempBoard.move(moveObj);
                 
                 const evalScore = this.minimax(tempBoard, depth - 1, false, alpha, beta);
                 maxEval = Math.max(maxEval, evalScore);
@@ -810,11 +888,23 @@ class ChessGame {
             let minEval = Infinity;
             const moves = board.moves({ verbose: true });
             
-            const sortedMoves = this.sortMoves(board, moves, false);
+            const sortedMoves = this.sortMovesForMinimaxSearch(board, moves, false);
             
             for (const move of sortedMoves) {
                 const tempBoard = new Chess(board.fen());
-                tempBoard.move({ from: move.from, to: move.to, promotion: move.promotion });
+                const moveObj = { from: move.from, to: move.to };
+                
+                // Обработка превращения пешки
+                const piece = tempBoard.get(move.from);
+                if (piece && piece.type === 'p') {
+                    const targetRank = move.to[1];
+                    if ((piece.color === 'b' && targetRank === '1') || 
+                        (piece.color === 'w' && targetRank === '8')) {
+                        moveObj.promotion = 'q';
+                    }
+                }
+                
+                tempBoard.move(moveObj);
                 
                 const evalScore = this.minimax(tempBoard, depth - 1, true, alpha, beta);
                 minEval = Math.min(minEval, evalScore);
@@ -832,17 +922,17 @@ class ChessGame {
         }
     }
 
-    // Сортировка ходов для лучшей работы альфа-бета отсечения
-    sortMoves(board, moves, isMaximizing) {
+    // Сортировка ходов для поиска в минимаксе
+    sortMovesForMinimaxSearch(board, moves, isMaximizing) {
         return moves.sort((a, b) => {
-            const scoreA = this.quickEvaluateMove(board, a, isMaximizing);
-            const scoreB = this.quickEvaluateMove(board, b, isMaximizing);
+            const scoreA = this.quickEvaluateMoveForSearch(board, a, isMaximizing);
+            const scoreB = this.quickEvaluateMoveForSearch(board, b, isMaximizing);
             return isMaximizing ? scoreB - scoreA : scoreA - scoreB;
         });
     }
 
-    // Быстрая оценка хода для сортировки
-    quickEvaluateMove(board, move, isMaximizing) {
+    // Быстрая оценка хода для сортировки в поиске
+    quickEvaluateMoveForSearch(board, move, isMaximizing) {
         let score = 0;
         
         // Взятия
@@ -861,15 +951,22 @@ class ChessGame {
             score += 1000;
         }
         
+        // Предотвращение возврата на ту же клетку
+        const moveKey = `${move.from}-${move.to}`;
+        if (this.moveOscillationCounter[moveKey] > 1) {
+            score -= 50;
+        }
+        
         return isMaximizing ? score : -score;
     }
 
-    // Оценка позиции на доске
+    // Оценка позиции на доске - ИСПРАВЛЕННАЯ
     evaluateBoard(board) {
         if (board.game_over()) {
             if (board.in_checkmate()) {
-                // Если мат - очень плохо или очень хорошо
-                return board.turn() === 'w' ? -10000 : 10000;
+                // Мат для стороны, которая сейчас ходит - плохо
+                // Бот играет за черных, поэтому мат черных - очень плохо
+                return board.turn() === 'b' ? -10000 : 10000;
             }
             // Ничья
             return 0;
@@ -877,7 +974,7 @@ class ChessGame {
         
         let score = 0;
         
-        // Материальный счет
+        // Материальный счет (с точки зрения белых)
         score += this.evaluateMaterial(board);
         
         // Позиционный счет
@@ -891,6 +988,18 @@ class ChessGame {
         
         // Пешечная структура
         score += this.evaluatePawnStructure(board);
+        
+        // Контроль центра
+        score += this.evaluateCenterControl(board);
+        
+        // Развитие фигур в начале игры
+        score += this.evaluateDevelopment(board);
+        
+        // Шах - небольшой бонус
+        if (board.in_check()) {
+            // Шах стороне, которая сейчас ходит - плохо для нее
+            score += board.turn() === 'w' ? -15 : 15;
+        }
         
         return score;
     }
@@ -921,7 +1030,7 @@ class ChessGame {
         let score = 0;
         const boardState = board.board();
         
-        // Таблицы позиционных оценок
+        // Таблицы позиционных оценок (с точки зрения белых)
         const pawnTable = [
             [0,  0,  0,  0,  0,  0,  0,  0],
             [50, 50, 50, 50, 50, 50, 50, 50],
@@ -944,13 +1053,35 @@ class ChessGame {
             [-50,-40,-30,-30,-30,-30,-40,-50]
         ];
         
+        const bishopTable = [
+            [-20,-10,-10,-10,-10,-10,-10,-20],
+            [-10,  0,  0,  0,  0,  0,  0,-10],
+            [-10,  0,  5, 10, 10,  5,  0,-10],
+            [-10,  5,  5, 10, 10,  5,  5,-10],
+            [-10,  0, 10, 10, 10, 10,  0,-10],
+            [-10, 10, 10, 10, 10, 10, 10,-10],
+            [-10,  5,  0,  0,  0,  0,  5,-10],
+            [-20,-10,-10,-10,-10,-10,-10,-20]
+        ];
+        
+        const kingTableMid = [
+            [-30,-40,-40,-50,-50,-40,-40,-30],
+            [-30,-40,-40,-50,-50,-40,-40,-30],
+            [-30,-40,-40,-50,-50,-40,-40,-30],
+            [-30,-40,-40,-50,-50,-40,-40,-30],
+            [-20,-30,-30,-40,-40,-30,-30,-20],
+            [-10,-20,-20,-20,-20,-20,-20,-10],
+            [20, 20,  0,  0,  0,  0, 20, 20],
+            [20, 30, 10,  0,  0, 10, 30, 20]
+        ];
+        
         for (let i = 0; i < 8; i++) {
             for (let j = 0; j < 8; j++) {
                 const piece = boardState[i][j];
                 if (piece) {
                     let tableValue = 0;
                     const row = piece.color === 'w' ? 7 - i : i;
-                    const col = j;
+                    const col = piece.color === 'w' ? j : 7 - j;
                     
                     switch(piece.type) {
                         case 'p':
@@ -960,23 +1091,22 @@ class ChessGame {
                             tableValue = knightTable[row][col];
                             break;
                         case 'b':
-                            // Слоны любят длинные диагонали
-                            tableValue = (row === 3 || row === 4) && (col === 3 || col === 4) ? 20 : 0;
+                            tableValue = bishopTable[row][col];
                             break;
                         case 'r':
                             // Ладьи на открытых вертикалях
-                            tableValue = 0;
+                            tableValue = (row >= 2 && row <= 5) ? 10 : 0;
                             break;
                         case 'q':
                             // Ферзи в центре
                             tableValue = (row >= 2 && row <= 5 && col >= 2 && col <= 5) ? 10 : 0;
                             break;
                         case 'k':
-                            // Короли в безопасности
-                            if (board.moveNumber() > 20) { // Эндшпиль
-                                tableValue = Math.abs(col - 3.5) * -5; // Король идет в центр
+                            if (board.moveNumber() > 30) { // Эндшпиль
+                                // Король идет в центр в эндшпиле
+                                tableValue = -Math.abs(3.5 - row) * 10 - Math.abs(3.5 - col) * 10;
                             } else {
-                                tableValue = (col === 4 || col === 5) ? -20 : 0; // Рокировка
+                                tableValue = kingTableMid[row][col];
                             }
                             break;
                     }
@@ -992,10 +1122,10 @@ class ChessGame {
     // Оценка мобильности (сколько ходов доступно)
     evaluateMobility(board) {
         const moves = board.moves().length;
-        const color = board.turn();
-        
-        // За мобильность текущей стороны
-        return color === 'w' ? moves * 2 : -moves * 2;
+        // Ходы за белых - плюс, ходы за черных - минус
+        // Но нужно учитывать чей сейчас ход
+        const score = moves * 0.1;
+        return board.turn() === 'w' ? score : -score;
     }
 
     // Оценка безопасности короля
@@ -1023,12 +1153,12 @@ class ChessGame {
         // Оцениваем безопасность по количеству пешек вокруг короля
         if (whiteKingSquare) {
             const pawnShield = this.countPawnShield(board, whiteKingSquare, 'w');
-            score += pawnShield * 10;
+            score += pawnShield * 15;
         }
         
         if (blackKingSquare) {
             const pawnShield = this.countPawnShield(board, blackKingSquare, 'b');
-            score -= pawnShield * 10;
+            score -= pawnShield * 15;
         }
         
         return score;
@@ -1039,12 +1169,16 @@ class ChessGame {
         const row = kingSquare.row;
         const col = kingSquare.col;
         
-        // Пешки перед королем
-        const frontRow = color === 'w' ? row + 1 : row - 1;
-        if (frontRow >= 0 && frontRow < 8) {
-            for (let c = col - 1; c <= col + 1; c++) {
-                if (c >= 0 && c < 8) {
-                    const piece = board.get(this.getSquareName2(frontRow, c));
+        // Пешки перед королем и рядом
+        for (let rOffset = -1; rOffset <= 1; rOffset++) {
+            for (let cOffset = -1; cOffset <= 1; cOffset++) {
+                if (rOffset === 0 && cOffset === 0) continue;
+                
+                const checkRow = row + (color === 'w' ? 1 : -1) + rOffset;
+                const checkCol = col + cOffset;
+                
+                if (checkRow >= 0 && checkRow < 8 && checkCol >= 0 && checkCol < 8) {
+                    const piece = board.get(this.getSquareName2(checkRow, checkCol));
                     if (piece && piece.type === 'p' && piece.color === color) {
                         shield++;
                     }
@@ -1061,6 +1195,57 @@ class ChessGame {
         return files[col] + ranks[row];
     }
 
+    // Новая функция: контроль центра
+    evaluateCenterControl(board) {
+        let score = 0;
+        const centerSquares = ['d4', 'e4', 'd5', 'e5', 'c3', 'f3', 'c6', 'f6'];
+        
+        for (const square of centerSquares) {
+            const piece = board.get(square);
+            if (piece) {
+                score += piece.color === 'w' ? 5 : -5;
+            }
+            
+            // Также учитываем атаку на центр
+            const attacks = board.moves({ square: square, verbose: true });
+            for (const attack of attacks) {
+                const attackingPiece = board.get(attack.from);
+                if (attackingPiece) {
+                    score += attackingPiece.color === 'w' ? 1 : -1;
+                }
+            }
+        }
+        
+        return score;
+    }
+
+    // Новая функция: оценка развития
+    evaluateDevelopment(board) {
+        let score = 0;
+        const boardState = board.board();
+        
+        // Если еще начало игры (первые 15 ходов)
+        if (board.moveNumber() < 15) {
+            // Штраф за неразвитые фигуры
+            for (let i = 0; i < 8; i++) {
+                for (let j = 0; j < 8; j++) {
+                    const piece = boardState[i][j];
+                    if (piece && piece.type !== 'p' && piece.type !== 'k') {
+                        // Фигуры на начальной позиции
+                        if (piece.color === 'w' && i === 7 && (j === 0 || j === 7 || j === 1 || j === 6 || j === 2 || j === 5 || j === 3 || j === 4)) {
+                            score -= 15; // Белые не развили фигуру
+                        }
+                        if (piece.color === 'b' && i === 0 && (j === 0 || j === 7 || j === 1 || j === 6 || j === 2 || j === 5 || j === 3 || j === 4)) {
+                            score += 15; // Черные не развили фигуру
+                        }
+                    }
+                }
+            }
+        }
+        
+        return score;
+    }
+
     // Оценка пешечной структуры
     evaluatePawnStructure(board) {
         let score = 0;
@@ -1074,10 +1259,16 @@ class ChessGame {
         const whiteDoubled = this.countDoubledPawns(boardState, 'w');
         const blackDoubled = this.countDoubledPawns(boardState, 'b');
         
-        score -= whiteIsolated * 15;
-        score += blackIsolated * 15;
-        score -= whiteDoubled * 10;
-        score += blackDoubled * 10;
+        // Проходные пешки
+        const whitePassed = this.countPassedPawns(board, 'w');
+        const blackPassed = this.countPassedPawns(board, 'b');
+        
+        score -= whiteIsolated * 20;
+        score += blackIsolated * 20;
+        score -= whiteDoubled * 15;
+        score += blackDoubled * 15;
+        score += whitePassed * 30;
+        score -= blackPassed * 30;
         
         return score;
     }
@@ -1138,11 +1329,149 @@ class ChessGame {
         return doubled;
     }
 
+    countPassedPawns(board, color) {
+        let passed = 0;
+        const boardState = board.board();
+        const direction = color === 'w' ? -1 : 1;
+        
+        for (let i = 0; i < 8; i++) {
+            for (let j = 0; j < 8; j++) {
+                const piece = boardState[i][j];
+                if (piece && piece.type === 'p' && piece.color === color) {
+                    let isPassed = true;
+                    
+                    // Проверяем нет ли вражеских пешек перед этой пешкой
+                    for (let checkRow = i + direction; checkRow >= 0 && checkRow < 8; checkRow += direction) {
+                        for (let checkCol = Math.max(0, j - 1); checkCol <= Math.min(7, j + 1); checkCol++) {
+                            const checkPiece = boardState[checkRow][checkCol];
+                            if (checkPiece && checkPiece.type === 'p' && checkPiece.color !== color) {
+                                isPassed = false;
+                                break;
+                            }
+                        }
+                        if (!isPassed) break;
+                    }
+                    
+                    if (isPassed) {
+                        passed++;
+                        // Бонус за продвинутую проходную пешку
+                        const advancement = color === 'w' ? 7 - i : i;
+                        passed += advancement * 0.5;
+                    }
+                }
+            }
+        }
+        
+        return passed;
+    }
+
     getPieceValue(pieceType) {
         const values = {
             'p': 100, 'n': 320, 'b': 330, 'r': 500, 'q': 900, 'k': 0
         };
         return values[pieceType] || 0;
+    }
+
+    // === ПРЕДОТВРАЩЕНИЕ БЕССМЫСЛЕННЫХ ХОДОВ ===
+    isMeaninglessMove(move, allMoves) {
+        if (!move) return true;
+        
+        // 1. Проверка на ход туда-обратно
+        if (this.lastBotMove) {
+            if (move.from === this.lastBotMove.to && move.to === this.lastBotMove.from) {
+                console.log('⚠️ Обнаружен ход туда-обратно');
+                return true;
+            }
+        }
+        
+        // 2. Проверка на осцилляцию (A->B->A->B)
+        const recentMoves = this.movesHistory.slice(-6);
+        if (recentMoves.length >= 4) {
+            const movePattern = this.detectMoveOscillation(recentMoves, move);
+            if (movePattern) {
+                console.log('⚠️ Обнаружена осцилляция ходов');
+                return true;
+            }
+        }
+        
+        // 3. Проверка на ход той же фигурой слишком часто
+        const moveKey = `${move.from}-${move.to}`;
+        if (!this.moveOscillationCounter[moveKey]) {
+            this.moveOscillationCounter[moveKey] = 0;
+        }
+        this.moveOscillationCounter[moveKey]++;
+        
+        if (this.moveOscillationCounter[moveKey] > 2) {
+            console.log('⚠️ Фигура ходит слишком часто на одни и те же клетки');
+            return true;
+        }
+        
+        // 4. Проверка на очень слабый ход (отдача материала без компенсации)
+        const piece = this.chess.get(move.from);
+        const captured = this.chess.get(move.to);
+        
+        if (piece && captured) {
+            const pieceValue = this.getPieceValue(piece.type);
+            const capturedValue = this.getPieceValue(captured.type);
+            
+            // Если отдаем более ценную фигуру за менее ценную
+            if (pieceValue > capturedValue * 1.5) {
+                console.log('⚠️ Плохой размен: отдаем более ценную фигуру');
+                return true;
+            }
+        }
+        
+        return false;
+    }
+
+    detectMoveOscillation(recentMoves, currentMove) {
+        // Преобразуем ходы в упрощенный формат "from-to"
+        const simplifiedMoves = recentMoves.map(san => {
+            // Это упрощение - в реальности нужно парсить SAN нотацию
+            // Для демо просто возвращаем последние 2 символа
+            return san;
+        });
+        
+        // Проверяем паттерны типа A B A B
+        if (simplifiedMoves.length >= 4) {
+            const lastFour = simplifiedMoves.slice(-4);
+            // Простая проверка на повторение
+            if (lastFour[0] === lastFour[2] && lastFour[1] === lastFour[3]) {
+                return true;
+            }
+        }
+        
+        return false;
+    }
+
+    getAlternativeMove(moves, badMove) {
+        // Ищем альтернативный ход, отличный от плохого
+        const goodMoves = moves.filter(move => {
+            const moveObj = this.createMoveObject(move);
+            return !this.isMeaninglessMove(moveObj, moves) && 
+                   (move.from !== badMove.from || move.to !== badMove.to);
+        });
+        
+        if (goodMoves.length > 0) {
+            // Выбираем лучший ход из оставшихся
+            if (this.difficulty === 'expert') {
+                return this.createMoveObject(this.getHardMove(goodMoves));
+            } else {
+                return this.createMoveObject(goodMoves[Math.floor(Math.random() * goodMoves.length)]);
+            }
+        }
+        
+        // Если нет хороших ходов, выбираем случайный, но не тот же самый
+        const otherMoves = moves.filter(move => 
+            move.from !== badMove.from || move.to !== badMove.to
+        );
+        
+        if (otherMoves.length > 0) {
+            return this.createMoveObject(otherMoves[Math.floor(Math.random() * otherMoves.length)]);
+        }
+        
+        // Если все ходы плохие, возвращаем исходный
+        return badMove;
     }
 
     // === БАЗОВЫЕ МЕТОДЫ ===
@@ -1305,7 +1634,7 @@ class ChessGame {
                 gameMode: this.gameMode,
                 currentPlayer: this.currentPlayer,
                 timestamp: new Date().toISOString(),
-                gameVersion: "2.3.0"
+                gameVersion: "2.3.1"
             };
             
             localStorage.setItem('chessGameState', JSON.stringify(gameState));
@@ -1320,7 +1649,7 @@ class ChessGame {
             if (saved) {
                 const gameState = JSON.parse(saved);
                 
-                if (!gameState.gameVersion || gameState.gameVersion !== "2.3.0") {
+                if (!gameState.gameVersion || gameState.gameVersion !== "2.3.1") {
                     console.log('💾 Устаревший формат сохранения, начинаем новую игру');
                     localStorage.removeItem('chessGameState');
                     return;
@@ -1394,6 +1723,8 @@ class ChessGame {
             this.legalMoves = [];
             this.currentPlayer = 'w';
             this.movesHistory = [];
+            this.lastBotMove = null;
+            this.moveOscillationCounter = {};
             this.clearHighlights();
             this.updateGame();
             this.updateMovesList();
