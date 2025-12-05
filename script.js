@@ -1,5 +1,5 @@
 // == ШАХМАТЫ В TELEGRAM ==
-// Версия: 2.3.1
+// Версия: 2.3.2
 // Автор: ChessBot
 // Дата: 2024
 // История версий:
@@ -17,12 +17,13 @@
 // 2.2.1 - Исправлено отображение доски и выбор сложности
 // 2.3.0 - Улучшен экспертный уровень: мини-макс алгоритм на 3 хода вперед
 // 2.3.1 - Исправлено странное поведение экспертного уровня, улучшена оценка позиций
+// 2.3.2 - Упрощен экспертный уровень для устранения бессмысленных ходов
 
 // Telegram Web App Integration
 class TelegramIntegration {
     constructor() {
         this.isTelegram = false;
-        this.version = "2.3.1";
+        this.version = "2.3.2";
         this.versionHistory = {
             "1.0.0": "Базовая версия игры",
             "1.1.0": "Исправлено зависание бота при превращении пешек", 
@@ -37,7 +38,8 @@ class TelegramIntegration {
             "2.2.0": "Добавлен новый уровень сложности 'Эксперт'",
             "2.2.1": "Исправлено отображение доски и выбор сложности",
             "2.3.0": "Улучшен экспертный уровень: мини-макс алгоритм на 3 хода вперед",
-            "2.3.1": "Исправлено странное поведение экспертного уровня, улучшена оценка позиций"
+            "2.3.1": "Исправлено странное поведение экспертного уровня, улучшена оценка позиций",
+            "2.3.2": "Упрощен экспертный уровень для устранения бессмысленных ходов"
         };
         this.buildDate = new Date().toISOString().split('T')[0];
         this.init();
@@ -165,7 +167,7 @@ class TelegramIntegration {
         if (!lastSeenVersion || lastSeenVersion !== this.version) {
             setTimeout(() => {
                 console.log(`%c🆕 Загружена новая версия! v${this.version}`, 'color: #FF9800; font-weight: bold;');
-                alert(`🎉 Новая версия шахмат v${this.version}!\n\nЭкспертный уровень теперь работает корректно! 🧠⚡`);
+                alert(`🎉 Новая версия шахмат v${this.version}!\n\nЭкспертный уровень теперь играет разумно без бессмысленных ходов! 🧠⚡`);
             }, 1000);
             
             localStorage.setItem('lastSeenVersion', this.version);
@@ -199,7 +201,9 @@ class ChessGame {
         this.gameMode = 'vsBot';
         this.isBotThinking = false;
         this.lastBotMove = null;
-        this.moveOscillationCounter = {};
+        this.lastBotPiece = null;
+        this.recentPositions = new Set();
+        this.moveRepetitionCounter = {};
         
         this.initializeBoard();
         this.bindEvents();
@@ -360,7 +364,7 @@ class ChessGame {
                 <option value="easy">🤖 Легкий</option>
                 <option value="medium" selected>🎯 Средний</option>
                 <option value="hard">🔥 Сложный</option>
-                <option value="expert">🧠 Эксперт (мини-макс)</option>
+                <option value="expert">🧠 Эксперт (упрощенный)</option>
             </select>
         `;
         
@@ -517,6 +521,14 @@ class ChessGame {
                 this.updateMovesList();
                 this.clearSelection();
                 this.currentPlayer = this.chess.turn();
+                
+                // Сохраняем позицию для отслеживания повторений
+                this.recentPositions.add(this.chess.fen());
+                if (this.recentPositions.size > 8) {
+                    const firstKey = Array.from(this.recentPositions)[0];
+                    this.recentPositions.delete(firstKey);
+                }
+                
                 this.updateGame();
                 this.saveGame();
             
@@ -550,7 +562,7 @@ class ChessGame {
                 this.botThinkingTime = 1200;
                 break;
             case 'expert':
-                this.botThinkingTime = 3500; // 3.5 секунды для мини-макса
+                this.botThinkingTime = 2000; // 2 секунды
                 break;
         }
         this.saveGame();
@@ -579,28 +591,27 @@ class ChessGame {
             let selectedMove;
             
             if (this.difficulty === 'expert') {
-                selectedMove = this.getExpertMinimaxMove(moves);
+                selectedMove = this.getExpertMove(moves);
             } else {
                 selectedMove = this.getBestMove(moves);
-            }
-            
-            // Проверка на осмысленность хода
-            if (selectedMove && this.isMeaninglessMove(selectedMove, moves)) {
-                console.log('⚠️ Предотвращен бессмысленный ход, выбираю альтернативу');
-                selectedMove = this.getAlternativeMove(moves, selectedMove);
             }
             
             if (selectedMove) {
                 const moveResult = this.chess.move(selectedMove);
                 if (moveResult) {
                     this.movesHistory.push(moveResult.san);
-                    this.lastBotMove = {
-                        from: selectedMove.from,
-                        to: selectedMove.to,
-                        san: moveResult.san
-                    };
+                    this.lastBotMove = selectedMove;
+                    this.lastBotPiece = this.chess.get(selectedMove.to);
                     this.updateMovesList();
                     this.currentPlayer = this.chess.turn();
+                    
+                    // Сохраняем позицию для отслеживания повторений
+                    this.recentPositions.add(this.chess.fen());
+                    if (this.recentPositions.size > 8) {
+                        const firstKey = Array.from(this.recentPositions)[0];
+                        this.recentPositions.delete(firstKey);
+                    }
+                    
                     this.saveGame();
                 } else {
                     throw new Error('Invalid move selected by bot');
@@ -737,741 +748,254 @@ class ChessGame {
         return bestMoves[Math.floor(Math.random() * Math.min(bestMoves.length, 3))];
     }
 
-    // === НОВЫЙ ЭКСПЕРТНЫЙ УРОВЕНЬ С МИНИ-МАКСОМ ===
-    getExpertMinimaxMove(moves) {
-        console.log('🧠 Эксперт использует мини-макс алгоритм (глубина 3)...');
+    // === УПРОЩЕННЫЙ ЭКСПЕРТНЫЙ УРОВЕНЬ ===
+    getExpertMove(moves) {
+        console.log('🧠 Эксперт использует упрощенный разумный алгоритм...');
         
-        // Если мало ходов - простой выбор
-        if (moves.length <= 3 || this.chess.game_over()) {
-            const hardMove = this.getHardMove(moves);
-            return this.createMoveObject(hardMove);
+        // 1. Фильтруем явно плохие ходы
+        let goodMoves = moves.filter(move => !this.isBadMove(move) && !this.isMeaninglessMove(move));
+        
+        if (goodMoves.length === 0) {
+            goodMoves = moves;
         }
         
-        let bestMove = null;
-        let bestScore = -Infinity;
-        let evaluatedMoves = 0;
-        
-        // Сортируем ходы для лучшего поиска (лучшие ходы сначала)
-        const sortedMoves = this.sortMovesForMinimax(moves);
-        
-        // Оцениваем каждый возможный ход
-        for (const move of sortedMoves) {
-            const moveObj = this.createMoveObject(move);
-            
-            // Делаем ход на временной доске
-            const tempChess = new Chess(this.chess.fen());
-            const result = tempChess.move(moveObj);
-            
-            if (result) {
-                // Оцениваем позицию после этого хода
-                // Глубина 3: наш ход -> ответ противника -> наш ответ
-                const score = this.minimax(tempChess, 2, false, -Infinity, Infinity);
-                
-                console.log(`🧠 Ход ${move.san}: оценка ${score.toFixed(2)}`);
-                
-                if (score > bestScore || (score === bestScore && Math.random() > 0.5)) {
-                    bestScore = score;
-                    bestMove = move;
-                }
-                
-                evaluatedMoves++;
-                
-                // Ограничиваем количество оцениваемых ходов, но более разумно
-                if (evaluatedMoves >= 20 && moves.length > 25) {
-                    console.log(`🧠 Оценил ${evaluatedMoves} из ${moves.length} ходов`);
-                    break;
-                }
-            }
-        }
-        
-        if (bestMove) {
-            console.log(`🧠 Выбран ход ${bestMove.san} с оценкой ${bestScore.toFixed(2)}`);
-            return this.createMoveObject(bestMove);
-        }
-        
-        // Фолбэк
-        console.log('🧠 Мини-макс не дал результата, использую старый алгоритм');
-        return this.createMoveObject(this.getHardMove(moves));
-    }
-
-    // Улучшенная сортировка ходов для минимакса
-    sortMovesForMinimax(moves) {
-        return moves.sort((a, b) => {
-            // Приоритет: мат, шах, взятия, хорошие ходы
-            const scoreA = this.getMovePriority(a);
-            const scoreB = this.getMovePriority(b);
-            return scoreB - scoreA;
+        // 2. Оцениваем каждый ход по нескольким критериям
+        const scoredMoves = goodMoves.map(move => {
+            return {
+                move: move,
+                score: this.evaluateMoveForExpert(move)
+            };
         });
+        
+        // 3. Сортируем по оценке
+        scoredMoves.sort((a, b) => b.score - a.score);
+        
+        console.log('🧠 Топ-3 хода:');
+        for (let i = 0; i < Math.min(3, scoredMoves.length); i++) {
+            console.log(`  ${scoredMoves[i].move.san}: ${scoredMoves[i].score}`);
+        }
+        
+        // 4. Выбираем лучший ход (или случайный из топ-3)
+        let selectedIndex = 0;
+        if (scoredMoves.length >= 3) {
+            // С вероятностью 70% берем лучший, 30% - второй или третий
+            const rand = Math.random();
+            if (rand < 0.7) selectedIndex = 0;
+            else if (rand < 0.85) selectedIndex = 1;
+            else selectedIndex = 2;
+        }
+        
+        const bestMove = scoredMoves[selectedIndex].move;
+        console.log(`🧠 Выбран ход: ${bestMove.san} (оценка: ${scoredMoves[selectedIndex].score})`);
+        
+        return this.createMoveObject(bestMove);
     }
 
-    getMovePriority(move) {
-        let priority = 0;
+    evaluateMoveForExpert(move) {
+        let score = 0;
         
-        // Мат - максимальный приоритет
-        if (move.san.includes('#')) return 1000;
+        // 1. Мат - максимальный приоритет
+        if (move.san.includes('#')) {
+            return 10000;
+        }
         
-        // Шах
-        if (move.san.includes('+')) priority += 100;
+        // 2. Шах
+        if (move.san.includes('+')) {
+            score += 100;
+        }
         
-        // Взятие
-        if (move.san.includes('x')) {
-            const captured = this.chess.get(move.to);
-            if (captured) {
-                priority += this.getPieceValue(captured.type) * 10;
+        // 3. Взятие фигуры
+        const capturedPiece = this.chess.get(move.to);
+        if (capturedPiece) {
+            const pieceValue = this.getPieceValue(capturedPiece.type);
+            score += pieceValue;
+            
+            // Если взятие с шахом - дополнительный бонус
+            if (move.san.includes('+')) {
+                score += pieceValue * 0.5;
             }
         }
         
-        // Рокировка
-        if (move.san === 'O-O' || move.san === 'O-O-O') priority += 50;
+        // 4. Рокировка - хороший ход в дебюте
+        if (move.san === 'O-O' || move.san === 'O-O-O') {
+            if (this.chess.moveNumber() < 15) {
+                score += 50;
+            }
+        }
         
-        // Развитие фигур в начале
+        // 5. Контроль центра
+        const centerSquares = ['d4', 'e4', 'd5', 'e5'];
+        if (centerSquares.includes(move.to)) {
+            score += 30;
+        }
+        
+        // 6. Развитие фигур в дебюте
         if (this.chess.moveNumber() < 10) {
             const piece = this.chess.get(move.from);
             if (piece && (piece.type === 'n' || piece.type === 'b')) {
-                priority += 20;
+                score += 20;
+            }
+            
+            // Выход ферзя слишком рано - штраф
+            if (piece && piece.type === 'q') {
+                score -= 15;
             }
         }
         
-        // Предотвращение осцилляций
+        // 7. Защита от повторений позиций
+        const moveKey = `${move.from}-${move.to}`;
+        if (this.moveRepetitionCounter[moveKey] > 0) {
+            score -= this.moveRepetitionCounter[moveKey] * 50;
+        }
+        
+        // 8. Предотвращение хода туда-обратно
         if (this.lastBotMove && move.from === this.lastBotMove.to && move.to === this.lastBotMove.from) {
-            priority -= 200; // Сильный штраф за ход туда-обратно
+            score -= 200;
         }
         
-        return priority;
-    }
-
-    // Мини-макс алгоритм с альфа-бета отсечением
-    minimax(board, depth, isMaximizing, alpha, beta) {
-        // Базовые случаи
-        if (depth === 0 || board.game_over()) {
-            return this.evaluateBoard(board);
+        // 9. Ход той же фигурой слишком часто
+        if (this.lastBotPiece && this.chess.get(move.from) && 
+            this.chess.get(move.from).type === this.lastBotPiece.type) {
+            score -= 30;
         }
         
-        if (isMaximizing) {
-            let maxEval = -Infinity;
-            const moves = board.moves({ verbose: true });
-            
-            // Сортируем ходы для лучшей работы альфа-бета отсечения
-            const sortedMoves = this.sortMovesForMinimaxSearch(board, moves, true);
-            
-            for (const move of sortedMoves) {
-                const tempBoard = new Chess(board.fen());
-                const moveObj = { from: move.from, to: move.to };
-                
-                // Обработка превращения пешки
-                const piece = tempBoard.get(move.from);
-                if (piece && piece.type === 'p') {
-                    const targetRank = move.to[1];
-                    if ((piece.color === 'b' && targetRank === '1') || 
-                        (piece.color === 'w' && targetRank === '8')) {
-                        moveObj.promotion = 'q';
-                    }
-                }
-                
-                tempBoard.move(moveObj);
-                
-                const evalScore = this.minimax(tempBoard, depth - 1, false, alpha, beta);
-                maxEval = Math.max(maxEval, evalScore);
-                alpha = Math.max(alpha, evalScore);
-                
-                if (beta <= alpha) {
-                    break; // Альфа-бета отсечение
-                }
-                
-                // Ограничиваем глубину поиска для скорости
-                if (depth >= 2 && moves.length > 30) {
-                    break;
-                }
-            }
-            return maxEval;
-        } else {
-            let minEval = Infinity;
-            const moves = board.moves({ verbose: true });
-            
-            const sortedMoves = this.sortMovesForMinimaxSearch(board, moves, false);
-            
-            for (const move of sortedMoves) {
-                const tempBoard = new Chess(board.fen());
-                const moveObj = { from: move.from, to: move.to };
-                
-                // Обработка превращения пешки
-                const piece = tempBoard.get(move.from);
-                if (piece && piece.type === 'p') {
-                    const targetRank = move.to[1];
-                    if ((piece.color === 'b' && targetRank === '1') || 
-                        (piece.color === 'w' && targetRank === '8')) {
-                        moveObj.promotion = 'q';
-                    }
-                }
-                
-                tempBoard.move(moveObj);
-                
-                const evalScore = this.minimax(tempBoard, depth - 1, true, alpha, beta);
-                minEval = Math.min(minEval, evalScore);
-                beta = Math.min(beta, evalScore);
-                
-                if (beta <= alpha) {
-                    break; // Альфа-бета отсечение
-                }
-                
-                if (depth >= 2 && moves.length > 30) {
-                    break;
-                }
-            }
-            return minEval;
+        // 10. Безопасность короля
+        score += this.evaluateKingSafetyAfterMove(move);
+        
+        // 11. Активность фигур (ход в сторону центра доски)
+        const fromCol = move.from.charCodeAt(0) - 96; // a=1, b=2, ...
+        const toCol = move.to.charCodeAt(0) - 96;
+        const fromRow = parseInt(move.from[1]);
+        const toRow = parseInt(move.to[1]);
+        
+        // Движение к центру
+        const centerCol = 4.5;
+        const centerRow = 4.5;
+        
+        const distanceFromBefore = Math.abs(fromCol - centerCol) + Math.abs(fromRow - centerRow);
+        const distanceFromAfter = Math.abs(toCol - centerCol) + Math.abs(toRow - centerRow);
+        
+        if (distanceFromAfter < distanceFromBefore) {
+            score += 10;
         }
+        
+        return score;
     }
 
-    // Сортировка ходов для поиска в минимаксе
-    sortMovesForMinimaxSearch(board, moves, isMaximizing) {
-        return moves.sort((a, b) => {
-            const scoreA = this.quickEvaluateMoveForSearch(board, a, isMaximizing);
-            const scoreB = this.quickEvaluateMoveForSearch(board, b, isMaximizing);
-            return isMaximizing ? scoreB - scoreA : scoreA - scoreB;
-        });
-    }
-
-    // Быстрая оценка хода для сортировки в поиске
-    quickEvaluateMoveForSearch(board, move, isMaximizing) {
+    evaluateKingSafetyAfterMove(move) {
         let score = 0;
         
-        // Взятия
-        const captured = board.get(move.to);
-        if (captured) {
-            score += this.getPieceValue(captured.type) * 10;
-        }
+        // Создаем временную доску для оценки
+        const tempChess = new Chess(this.chess.fen());
+        const moveObj = this.createMoveObject(move);
+        tempChess.move(moveObj);
         
-        // Шах
-        if (move.san.includes('+')) {
-            score += 5;
-        }
-        
-        // Мат
-        if (move.san.includes('#')) {
-            score += 1000;
-        }
-        
-        // Предотвращение возврата на ту же клетку
-        const moveKey = `${move.from}-${move.to}`;
-        if (this.moveOscillationCounter[moveKey] > 1) {
+        // Штраф за оставление короля под шахом
+        if (tempChess.in_check()) {
             score -= 50;
         }
         
-        return isMaximizing ? score : -score;
-    }
-
-    // Оценка позиции на доске - ИСПРАВЛЕННАЯ
-    evaluateBoard(board) {
-        if (board.game_over()) {
-            if (board.in_checkmate()) {
-                // Мат для стороны, которая сейчас ходит - плохо
-                // Бот играет за черных, поэтому мат черных - очень плохо
-                return board.turn() === 'b' ? -10000 : 10000;
-            }
-            // Ничья
-            return 0;
-        }
-        
-        let score = 0;
-        
-        // Материальный счет (с точки зрения белых)
-        score += this.evaluateMaterial(board);
-        
-        // Позиционный счет
-        score += this.evaluatePosition(board);
-        
-        // Активность фигур
-        score += this.evaluateMobility(board);
-        
-        // Безопасность короля
-        score += this.evaluateKingSafety(board);
-        
-        // Пешечная структура
-        score += this.evaluatePawnStructure(board);
-        
-        // Контроль центра
-        score += this.evaluateCenterControl(board);
-        
-        // Развитие фигур в начале игры
-        score += this.evaluateDevelopment(board);
-        
-        // Шах - небольшой бонус
-        if (board.in_check()) {
-            // Шах стороне, которая сейчас ходит - плохо для нее
-            score += board.turn() === 'w' ? -15 : 15;
-        }
-        
-        return score;
-    }
-
-    // Оценка материала
-    evaluateMaterial(board) {
-        let score = 0;
-        const pieceValues = {
-            'p': 100, 'n': 320, 'b': 330, 'r': 500, 'q': 900, 'k': 0
-        };
-        
-        const boardState = board.board();
-        for (let i = 0; i < 8; i++) {
-            for (let j = 0; j < 8; j++) {
-                const piece = boardState[i][j];
-                if (piece) {
-                    const value = pieceValues[piece.type] || 0;
-                    score += piece.color === 'w' ? value : -value;
-                }
-            }
-        }
-        
-        return score;
-    }
-
-    // Оценка позиции (где стоят фигуры)
-    evaluatePosition(board) {
-        let score = 0;
-        const boardState = board.board();
-        
-        // Таблицы позиционных оценок (с точки зрения белых)
-        const pawnTable = [
-            [0,  0,  0,  0,  0,  0,  0,  0],
-            [50, 50, 50, 50, 50, 50, 50, 50],
-            [10, 10, 20, 30, 30, 20, 10, 10],
-            [5,  5, 10, 25, 25, 10,  5,  5],
-            [0,  0,  0, 20, 20,  0,  0,  0],
-            [5, -5,-10,  0,  0,-10, -5,  5],
-            [5, 10, 10,-20,-20, 10, 10,  5],
-            [0,  0,  0,  0,  0,  0,  0,  0]
-        ];
-        
-        const knightTable = [
-            [-50,-40,-30,-30,-30,-30,-40,-50],
-            [-40,-20,  0,  0,  0,  0,-20,-40],
-            [-30,  0, 10, 15, 15, 10,  0,-30],
-            [-30,  5, 15, 20, 20, 15,  5,-30],
-            [-30,  0, 15, 20, 20, 15,  0,-30],
-            [-30,  5, 10, 15, 15, 10,  5,-30],
-            [-40,-20,  0,  5,  5,  0,-20,-40],
-            [-50,-40,-30,-30,-30,-30,-40,-50]
-        ];
-        
-        const bishopTable = [
-            [-20,-10,-10,-10,-10,-10,-10,-20],
-            [-10,  0,  0,  0,  0,  0,  0,-10],
-            [-10,  0,  5, 10, 10,  5,  0,-10],
-            [-10,  5,  5, 10, 10,  5,  5,-10],
-            [-10,  0, 10, 10, 10, 10,  0,-10],
-            [-10, 10, 10, 10, 10, 10, 10,-10],
-            [-10,  5,  0,  0,  0,  0,  5,-10],
-            [-20,-10,-10,-10,-10,-10,-10,-20]
-        ];
-        
-        const kingTableMid = [
-            [-30,-40,-40,-50,-50,-40,-40,-30],
-            [-30,-40,-40,-50,-50,-40,-40,-30],
-            [-30,-40,-40,-50,-50,-40,-40,-30],
-            [-30,-40,-40,-50,-50,-40,-40,-30],
-            [-20,-30,-30,-40,-40,-30,-30,-20],
-            [-10,-20,-20,-20,-20,-20,-20,-10],
-            [20, 20,  0,  0,  0,  0, 20, 20],
-            [20, 30, 10,  0,  0, 10, 30, 20]
-        ];
-        
-        for (let i = 0; i < 8; i++) {
-            for (let j = 0; j < 8; j++) {
-                const piece = boardState[i][j];
-                if (piece) {
-                    let tableValue = 0;
-                    const row = piece.color === 'w' ? 7 - i : i;
-                    const col = piece.color === 'w' ? j : 7 - j;
-                    
-                    switch(piece.type) {
-                        case 'p':
-                            tableValue = pawnTable[row][col];
-                            break;
-                        case 'n':
-                            tableValue = knightTable[row][col];
-                            break;
-                        case 'b':
-                            tableValue = bishopTable[row][col];
-                            break;
-                        case 'r':
-                            // Ладьи на открытых вертикалях
-                            tableValue = (row >= 2 && row <= 5) ? 10 : 0;
-                            break;
-                        case 'q':
-                            // Ферзи в центре
-                            tableValue = (row >= 2 && row <= 5 && col >= 2 && col <= 5) ? 10 : 0;
-                            break;
-                        case 'k':
-                            if (board.moveNumber() > 30) { // Эндшпиль
-                                // Король идет в центр в эндшпиле
-                                tableValue = -Math.abs(3.5 - row) * 10 - Math.abs(3.5 - col) * 10;
-                            } else {
-                                tableValue = kingTableMid[row][col];
-                            }
-                            break;
-                    }
-                    
-                    score += piece.color === 'w' ? tableValue : -tableValue;
-                }
-            }
-        }
-        
-        return score;
-    }
-
-    // Оценка мобильности (сколько ходов доступно)
-    evaluateMobility(board) {
-        const moves = board.moves().length;
-        // Ходы за белых - плюс, ходы за черных - минус
-        // Но нужно учитывать чей сейчас ход
-        const score = moves * 0.1;
-        return board.turn() === 'w' ? score : -score;
-    }
-
-    // Оценка безопасности короля
-    evaluateKingSafety(board) {
-        let score = 0;
-        const boardState = board.board();
-        
-        // Находим королей
-        let whiteKingSquare = null;
-        let blackKingSquare = null;
-        
-        for (let i = 0; i < 8; i++) {
-            for (let j = 0; j < 8; j++) {
-                const piece = boardState[i][j];
-                if (piece && piece.type === 'k') {
-                    if (piece.color === 'w') {
-                        whiteKingSquare = { row: i, col: j };
-                    } else {
-                        blackKingSquare = { row: i, col: j };
-                    }
-                }
-            }
-        }
-        
-        // Оцениваем безопасность по количеству пешек вокруг короля
-        if (whiteKingSquare) {
-            const pawnShield = this.countPawnShield(board, whiteKingSquare, 'w');
-            score += pawnShield * 15;
-        }
-        
-        if (blackKingSquare) {
-            const pawnShield = this.countPawnShield(board, blackKingSquare, 'b');
-            score -= pawnShield * 15;
-        }
-        
-        return score;
-    }
-
-    countPawnShield(board, kingSquare, color) {
-        let shield = 0;
-        const row = kingSquare.row;
-        const col = kingSquare.col;
-        
-        // Пешки перед королем и рядом
-        for (let rOffset = -1; rOffset <= 1; rOffset++) {
-            for (let cOffset = -1; cOffset <= 1; cOffset++) {
-                if (rOffset === 0 && cOffset === 0) continue;
-                
-                const checkRow = row + (color === 'w' ? 1 : -1) + rOffset;
-                const checkCol = col + cOffset;
-                
-                if (checkRow >= 0 && checkRow < 8 && checkCol >= 0 && checkCol < 8) {
-                    const piece = board.get(this.getSquareName2(checkRow, checkCol));
-                    if (piece && piece.type === 'p' && piece.color === color) {
-                        shield++;
-                    }
-                }
-            }
-        }
-        
-        return shield;
-    }
-
-    getSquareName2(row, col) {
-        const files = 'abcdefgh';
-        const ranks = '87654321';
-        return files[col] + ranks[row];
-    }
-
-    // Новая функция: контроль центра
-    evaluateCenterControl(board) {
-        let score = 0;
-        const centerSquares = ['d4', 'e4', 'd5', 'e5', 'c3', 'f3', 'c6', 'f6'];
-        
-        for (const square of centerSquares) {
-            const piece = board.get(square);
-            if (piece) {
-                score += piece.color === 'w' ? 5 : -5;
-            }
+        // Проверяем безопасность короля после хода
+        const kingSquare = this.findKingSquare('b'); // Бот играет черными
+        if (kingSquare) {
+            // Подсчитываем количество защитников вокруг короля
+            const defenders = this.countDefenders(tempChess, kingSquare, 'b');
+            const attackers = this.countAttackers(tempChess, kingSquare, 'w');
             
-            // Также учитываем атаку на центр
-            const attacks = board.moves({ square: square, verbose: true });
-            for (const attack of attacks) {
-                const attackingPiece = board.get(attack.from);
-                if (attackingPiece) {
-                    score += attackingPiece.color === 'w' ? 1 : -1;
-                }
-            }
+            score += (defenders - attackers) * 10;
         }
         
         return score;
     }
 
-    // Новая функция: оценка развития
-    evaluateDevelopment(board) {
-        let score = 0;
-        const boardState = board.board();
+    countDefenders(board, square, color) {
+        let defenders = 0;
+        const moves = board.moves({ verbose: true });
         
-        // Если еще начало игры (первые 15 ходов)
-        if (board.moveNumber() < 15) {
-            // Штраф за неразвитые фигуры
-            for (let i = 0; i < 8; i++) {
-                for (let j = 0; j < 8; j++) {
-                    const piece = boardState[i][j];
-                    if (piece && piece.type !== 'p' && piece.type !== 'k') {
-                        // Фигуры на начальной позиции
-                        if (piece.color === 'w' && i === 7 && (j === 0 || j === 7 || j === 1 || j === 6 || j === 2 || j === 5 || j === 3 || j === 4)) {
-                            score -= 15; // Белые не развили фигуру
-                        }
-                        if (piece.color === 'b' && i === 0 && (j === 0 || j === 7 || j === 1 || j === 6 || j === 2 || j === 5 || j === 3 || j === 4)) {
-                            score += 15; // Черные не развили фигуру
-                        }
-                    }
+        // Ищем ходы наших фигур на эту клетку
+        for (const move of moves) {
+            if (move.to === square) {
+                const piece = board.get(move.from);
+                if (piece && piece.color === color) {
+                    defenders++;
                 }
             }
         }
         
-        return score;
+        return defenders;
     }
 
-    // Оценка пешечной структуры
-    evaluatePawnStructure(board) {
-        let score = 0;
-        const boardState = board.board();
+    countAttackers(board, square, color) {
+        let attackers = 0;
+        const moves = board.moves({ verbose: true });
         
-        // Изолированные пешки
-        const whiteIsolated = this.countIsolatedPawns(boardState, 'w');
-        const blackIsolated = this.countIsolatedPawns(boardState, 'b');
-        
-        // Сдвоенные пешки
-        const whiteDoubled = this.countDoubledPawns(boardState, 'w');
-        const blackDoubled = this.countDoubledPawns(boardState, 'b');
-        
-        // Проходные пешки
-        const whitePassed = this.countPassedPawns(board, 'w');
-        const blackPassed = this.countPassedPawns(board, 'b');
-        
-        score -= whiteIsolated * 20;
-        score += blackIsolated * 20;
-        score -= whiteDoubled * 15;
-        score += blackDoubled * 15;
-        score += whitePassed * 30;
-        score -= blackPassed * 30;
-        
-        return score;
-    }
-
-    countIsolatedPawns(boardState, color) {
-        let isolated = 0;
-        const pawnFiles = new Set();
-        
-        // Собираем все файлы с пешками
-        for (let i = 0; i < 8; i++) {
-            for (let j = 0; j < 8; j++) {
-                const piece = boardState[i][j];
-                if (piece && piece.type === 'p' && piece.color === color) {
-                    pawnFiles.add(j);
+        // Ищем ходы вражеских фигур на эту клетку
+        for (const move of moves) {
+            if (move.to === square) {
+                const piece = board.get(move.from);
+                if (piece && piece.color === color) {
+                    attackers++;
                 }
             }
         }
         
-        // Проверяем изолированные пешки
-        for (let i = 0; i < 8; i++) {
-            for (let j = 0; j < 8; j++) {
-                const piece = boardState[i][j];
-                if (piece && piece.type === 'p' && piece.color === color) {
-                    const hasLeftPawn = pawnFiles.has(j - 1);
-                    const hasRightPawn = pawnFiles.has(j + 1);
-                    
-                    if (!hasLeftPawn && !hasRightPawn) {
-                        isolated++;
-                    }
-                }
-            }
-        }
-        
-        return isolated;
-    }
-
-    countDoubledPawns(boardState, color) {
-        let doubled = 0;
-        const pawnsPerFile = new Array(8).fill(0);
-        
-        // Считаем пешки по файлам
-        for (let i = 0; i < 8; i++) {
-            for (let j = 0; j < 8; j++) {
-                const piece = boardState[i][j];
-                if (piece && piece.type === 'p' && piece.color === color) {
-                    pawnsPerFile[j]++;
-                }
-            }
-        }
-        
-        // Сдвоенные пешки - больше одной на файле
-        for (let count of pawnsPerFile) {
-            if (count > 1) {
-                doubled += count - 1;
-            }
-        }
-        
-        return doubled;
-    }
-
-    countPassedPawns(board, color) {
-        let passed = 0;
-        const boardState = board.board();
-        const direction = color === 'w' ? -1 : 1;
-        
-        for (let i = 0; i < 8; i++) {
-            for (let j = 0; j < 8; j++) {
-                const piece = boardState[i][j];
-                if (piece && piece.type === 'p' && piece.color === color) {
-                    let isPassed = true;
-                    
-                    // Проверяем нет ли вражеских пешек перед этой пешкой
-                    for (let checkRow = i + direction; checkRow >= 0 && checkRow < 8; checkRow += direction) {
-                        for (let checkCol = Math.max(0, j - 1); checkCol <= Math.min(7, j + 1); checkCol++) {
-                            const checkPiece = boardState[checkRow][checkCol];
-                            if (checkPiece && checkPiece.type === 'p' && checkPiece.color !== color) {
-                                isPassed = false;
-                                break;
-                            }
-                        }
-                        if (!isPassed) break;
-                    }
-                    
-                    if (isPassed) {
-                        passed++;
-                        // Бонус за продвинутую проходную пешку
-                        const advancement = color === 'w' ? 7 - i : i;
-                        passed += advancement * 0.5;
-                    }
-                }
-            }
-        }
-        
-        return passed;
-    }
-
-    getPieceValue(pieceType) {
-        const values = {
-            'p': 100, 'n': 320, 'b': 330, 'r': 500, 'q': 900, 'k': 0
-        };
-        return values[pieceType] || 0;
+        return attackers;
     }
 
     // === ПРЕДОТВРАЩЕНИЕ БЕССМЫСЛЕННЫХ ХОДОВ ===
-    isMeaninglessMove(move, allMoves) {
-        if (!move) return true;
-        
-        // 1. Проверка на ход туда-обратно
-        if (this.lastBotMove) {
-            if (move.from === this.lastBotMove.to && move.to === this.lastBotMove.from) {
-                console.log('⚠️ Обнаружен ход туда-обратно');
-                return true;
-            }
-        }
-        
-        // 2. Проверка на осцилляцию (A->B->A->B)
-        const recentMoves = this.movesHistory.slice(-6);
-        if (recentMoves.length >= 4) {
-            const movePattern = this.detectMoveOscillation(recentMoves, move);
-            if (movePattern) {
-                console.log('⚠️ Обнаружена осцилляция ходов');
-                return true;
-            }
-        }
-        
-        // 3. Проверка на ход той же фигурой слишком часто
-        const moveKey = `${move.from}-${move.to}`;
-        if (!this.moveOscillationCounter[moveKey]) {
-            this.moveOscillationCounter[moveKey] = 0;
-        }
-        this.moveOscillationCounter[moveKey]++;
-        
-        if (this.moveOscillationCounter[moveKey] > 2) {
-            console.log('⚠️ Фигура ходит слишком часто на одни и те же клетки');
+    isMeaninglessMove(move) {
+        // 1. Ход туда-обратно
+        if (this.lastBotMove && move.from === this.lastBotMove.to && move.to === this.lastBotMove.from) {
+            console.log('⚠️ Обнаружен ход туда-обратно:', move.san);
             return true;
         }
         
-        // 4. Проверка на очень слабый ход (отдача материала без компенсации)
-        const piece = this.chess.get(move.from);
-        const captured = this.chess.get(move.to);
+        // 2. Ход на клетку, которая только что была покинута
+        if (this.movesHistory.length > 0) {
+            const lastMove = this.movesHistory[this.movesHistory.length - 1];
+            // Простая проверка: если ходим на ту же клетку, куда только что ходил противник
+            // Это упрощенная логика, в реальности нужно парсить нотацию
+            if (lastMove && lastMove.includes(move.to)) {
+                // Проверяем, не берем ли мы фигуру
+                if (!move.san.includes('x')) {
+                    console.log('⚠️ Ход на только что покинутую клетку:', move.san);
+                    return true;
+                }
+            }
+        }
         
-        if (piece && captured) {
-            const pieceValue = this.getPieceValue(piece.type);
-            const capturedValue = this.getPieceValue(captured.type);
-            
-            // Если отдаем более ценную фигуру за менее ценную
-            if (pieceValue > capturedValue * 1.5) {
-                console.log('⚠️ Плохой размен: отдаем более ценную фигуру');
-                return true;
+        // 3. Частые повторения одного и того же хода
+        const moveKey = `${move.from}-${move.to}`;
+        if (!this.moveRepetitionCounter[moveKey]) {
+            this.moveRepetitionCounter[moveKey] = 0;
+        }
+        this.moveRepetitionCounter[moveKey]++;
+        
+        if (this.moveRepetitionCounter[moveKey] > 2) {
+            console.log('⚠️ Слишком частый повтор хода:', move.san);
+            return true;
+        }
+        
+        // 4. Ход фигурой, которая только что ходила
+        if (this.lastBotPiece) {
+            const currentPiece = this.chess.get(move.from);
+            if (currentPiece && currentPiece.type === this.lastBotPiece.type && 
+                currentPiece.color === this.lastBotPiece.color) {
+                // Та же фигура ходит два раза подряд - может быть нормально, 
+                // но если это не взятие и не шах, то возможно бессмысленно
+                if (!move.san.includes('x') && !move.san.includes('+')) {
+                    // Проверяем, не движется ли фигура назад
+                    const pieceType = currentPiece.type;
+                    if (pieceType === 'r' || pieceType === 'q' || pieceType === 'b') {
+                        // Для дальнобойных фигур два хода подряд без взятия - подозрительно
+                        console.log('⚠️ Дальнобойная фигура ходит дважды без взятия:', move.san);
+                        return true;
+                    }
+                }
             }
         }
         
         return false;
-    }
-
-    detectMoveOscillation(recentMoves, currentMove) {
-        // Преобразуем ходы в упрощенный формат "from-to"
-        const simplifiedMoves = recentMoves.map(san => {
-            // Это упрощение - в реальности нужно парсить SAN нотацию
-            // Для демо просто возвращаем последние 2 символа
-            return san;
-        });
-        
-        // Проверяем паттерны типа A B A B
-        if (simplifiedMoves.length >= 4) {
-            const lastFour = simplifiedMoves.slice(-4);
-            // Простая проверка на повторение
-            if (lastFour[0] === lastFour[2] && lastFour[1] === lastFour[3]) {
-                return true;
-            }
-        }
-        
-        return false;
-    }
-
-    getAlternativeMove(moves, badMove) {
-        // Ищем альтернативный ход, отличный от плохого
-        const goodMoves = moves.filter(move => {
-            const moveObj = this.createMoveObject(move);
-            return !this.isMeaninglessMove(moveObj, moves) && 
-                   (move.from !== badMove.from || move.to !== badMove.to);
-        });
-        
-        if (goodMoves.length > 0) {
-            // Выбираем лучший ход из оставшихся
-            if (this.difficulty === 'expert') {
-                return this.createMoveObject(this.getHardMove(goodMoves));
-            } else {
-                return this.createMoveObject(goodMoves[Math.floor(Math.random() * goodMoves.length)]);
-            }
-        }
-        
-        // Если нет хороших ходов, выбираем случайный, но не тот же самый
-        const otherMoves = moves.filter(move => 
-            move.from !== badMove.from || move.to !== badMove.to
-        );
-        
-        if (otherMoves.length > 0) {
-            return this.createMoveObject(otherMoves[Math.floor(Math.random() * otherMoves.length)]);
-        }
-        
-        // Если все ходы плохие, возвращаем исходный
-        return badMove;
     }
 
     // === БАЗОВЫЕ МЕТОДЫ ===
@@ -1507,6 +1031,13 @@ class ChessGame {
             return pieceValues[capturedPiece.type] || 0;
         }
         return 0;
+    }
+
+    getPieceValue(pieceType) {
+        const values = {
+            'p': 100, 'n': 320, 'b': 330, 'r': 500, 'q': 900, 'k': 0
+        };
+        return values[pieceType] || 0;
     }
 
     // === УПРАВЛЕНИЕ ИГРОЙ ===
@@ -1551,7 +1082,7 @@ class ChessGame {
             'easy': '🤖 Легкий',
             'medium': '🎯 Средний', 
             'hard': '🔥 Сложный',
-            'expert': '🧠 Эксперт (мини-макс)'
+            'expert': '🧠 Эксперт (упрощенный)'
         };
         
         if (this.chess.game_over()) {
@@ -1634,7 +1165,7 @@ class ChessGame {
                 gameMode: this.gameMode,
                 currentPlayer: this.currentPlayer,
                 timestamp: new Date().toISOString(),
-                gameVersion: "2.3.1"
+                gameVersion: "2.3.2"
             };
             
             localStorage.setItem('chessGameState', JSON.stringify(gameState));
@@ -1649,7 +1180,7 @@ class ChessGame {
             if (saved) {
                 const gameState = JSON.parse(saved);
                 
-                if (!gameState.gameVersion || gameState.gameVersion !== "2.3.1") {
+                if (!gameState.gameVersion || gameState.gameVersion !== "2.3.2") {
                     console.log('💾 Устаревший формат сохранения, начинаем новую игру');
                     localStorage.removeItem('chessGameState');
                     return;
@@ -1724,7 +1255,9 @@ class ChessGame {
             this.currentPlayer = 'w';
             this.movesHistory = [];
             this.lastBotMove = null;
-            this.moveOscillationCounter = {};
+            this.lastBotPiece = null;
+            this.recentPositions = new Set();
+            this.moveRepetitionCounter = {};
             this.clearHighlights();
             this.updateGame();
             this.updateMovesList();
